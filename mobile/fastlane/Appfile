@@ -1,0 +1,2 @@
+# Fastlane — set app_identifier and team before release builds
+# app_identifier("com.swerte3.app")

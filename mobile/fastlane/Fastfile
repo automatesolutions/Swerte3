@@ -1,0 +1,17 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Internal beta (configure signing + match first)"
+  lane :beta do
+    # add: sync_code_signing; build_app; upload_to_testflight
+    UI.message("Configure signing, then run: fastlane ios beta")
+  end
+end
+
+platform :android do
+  desc "Internal Android build"
+  lane :internal do
+    # gradle(task: "bundleRelease")
+    UI.message("Open android/ in bare workflow or use EAS Build for Expo")
+  end
+end
