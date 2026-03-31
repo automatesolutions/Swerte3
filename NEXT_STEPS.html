@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Swerte3 Next Steps</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 24px; }
+    h1, h2 { margin: 0 0 12px; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 22px; margin-top: 28px; }
+    .card { background: #111827; border: 1px solid #334155; border-radius: 14px; padding: 16px; margin: 14px 0; }
+    ul, ol { margin: 8px 0 0 22px; }
+    li { margin: 8px 0; line-height: 1.45; }
+    code, pre { background: #020617; border: 1px solid #334155; border-radius: 8px; }
+    code { padding: 2px 6px; }
+    pre { padding: 12px; overflow: auto; }
+    .muted { color: #94a3b8; }
+    .ok { color: #22c55e; font-weight: 600; }
+    .warn { color: #f59e0b; font-weight: 600; }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Swerte3 - What To Do Next</h1>
+    <p class="muted">Project path: <code>C:\Users\jonel\OneDrive\Desktop\Jonel_Projects\Swerte3</code></p>
+
+    <div class="card">
+      <h2>1) Configure environment files</h2>
+      <ol>
+        <li>Backend: copy <code>backend/.env.example</code> to <code>backend/.env</code>.</li>
+        <li>Fill required values:
+          <ul>
+            <li><code>DATABASE_URL</code> (PostgreSQL connection)</li>
+            <li><code>SECRET_KEY</code></li>
+            <li><code>ADMIN_API_KEY</code> (required to trigger ingest endpoint)</li>
+            <li><code>LLM_API_KEY</code> (required for premium Miro + swarm)</li>
+            <li><code>PAYMONGO_SECRET_KEY</code> and <code>PAYMONGO_WEBHOOK_SECRET</code> (for payments)</li>
+          </ul>
+        </li>
+        <li>Mobile: copy <code>mobile/.env.example</code> to <code>mobile/.env</code> and set <code>EXPO_PUBLIC_API_URL</code>.</li>
+      </ol>
+    </div>
+
+    <div class="card">
+      <h2>2) Start backend API</h2>
+      <pre>cd backend
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+alembic upgrade head
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</pre>
+      <p><span class="ok">Check:</span> open <code>http://127.0.0.1:8000/health</code> and confirm <code>{"status":"ok"}</code>.</p>
+    </div>
+
+    <div class="card">
+      <h2>3) Ingest Google Sheets data (9AM / 4PM / 9PM)</h2>
+      <p>After backend is running and <code>ADMIN_API_KEY</code> is set:</p>
+      <pre>curl -X POST "http://127.0.0.1:8000/api/internal/ingest" ^
+  -H "X-Admin-Key: &lt;YOUR_ADMIN_API_KEY&gt;"</pre>
+      <p><span class="ok">Expected:</span> JSON containing <code>inserted</code>, <code>skipped</code>, and possible <code>errors</code>.</p>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>4) Test auth flow</h2>
+        <ol>
+          <li>Call <code>/api/auth/otp/request</code> with phone.</li>
+          <li>When <code>SMS_PROVIDER=console</code>, OTP appears in backend logs.</li>
+          <li>Verify with <code>/api/auth/otp/verify</code> to receive JWT tokens.</li>
+        </ol>
+      </div>
+      <div class="card">
+        <h2>5) Test predictions</h2>
+        <ul>
+          <li>Free: <code>/api/predict/free?session=9am</code></li>
+          <li>Premium: <code>/api/predict/premium?session=9am</code> (requires JWT + premium entitlement)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>6) Start mobile app</h2>
+      <pre>cd mobile
+npm install
+npx expo start</pre>
+      <ul>
+        <li>Use Android emulator URL: <code>http://10.0.2.2:8000</code> if needed.</li>
+        <li>For physical device, use your PC LAN IP in <code>EXPO_PUBLIC_API_URL</code>.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>7) Run test suites</h2>
+      <pre>cd backend
+pytest
+
+cd ..\mobile
+npm test
+npx tsc --noEmit</pre>
+      <p class="muted">Backend tests currently run against in-memory SQLite for convenience.</p>
+    </div>
+
+    <div class="card">
+      <h2>8) Production readiness checklist</h2>
+      <ul>
+        <li>Replace console OTP with Twilio/Vonage/Firebase provider.</li>
+        <li>Wire real PayMongo checkout metadata <code>user_id</code> so webhook grants premium.</li>
+        <li>Add Detox/Appium E2E pipeline in CI.</li>
+        <li>Deploy backend with <code>backend/Dockerfile</code> and <code>backend/cloudbuild.yaml</code>.</li>
+        <li>Configure Fastlane/EAS signing and release tracks.</li>
+      </ul>
+      <p class="warn">Important: lottery outputs must stay advisory/disclaimer-only.</p>
+    </div>
+  </div>
+</body>
+</html>
