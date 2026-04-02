@@ -273,7 +273,7 @@ export function MathAlgoScreen(_props: Props): React.ReactElement {
               <View style={styles.lockedBanner}>
                 <Text style={styles.lockedTitle}>Tapos na ang sagot ngayon</Text>
                 <Text style={styles.lockedBody}>
-                  Isang beses lang bawat araw bawat naka-log in na numero (Manila). Kung magpalit ng ibang
+                  Isang beses lang bawat araw bawat naka-log in na numero. Kung magpalit ng ibang
                   numero, may hiwalay na sagot pa rin sila ngayong araw. Bumalik bukas para sa bagong
                   challenge sa account na ito.
                 </Text>

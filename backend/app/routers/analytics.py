@@ -16,5 +16,5 @@ def analytics_dashboard(
     session: Optional[Literal["9am", "4pm", "9pm"]] = None,
     db: Session = Depends(get_db),
 ):
-    """Gaussian-style scatter (sum vs log product), co-occurrence matrix, transition graphs, error histogram (DB-backed)."""
+    """Draw-backed Gaussian stats, error-distance series, co-occurrence / cross-draw graphs, histogram (DB-backed)."""
     return build_dashboard(db, session=session)

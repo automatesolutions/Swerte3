@@ -1,190 +1,207 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Dimensions, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Button, Paragraph, Title } from 'react-native-paper';
+import React from 'react';
+import {
+  Image,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import type { AnalyticsDashboard } from '../services/api';
-import { fetchAnalyticsDashboard } from '../services/api';
-import type { RootStackParamList } from '../navigation/types';
+import { ANALYTICS_CYAN, ANALYTICS_GOLD, ANALYTICS_MUTED } from '../analytics/chartParts';
+import type { AnalyticsFeatureKind, RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Analytics'>;
 
-const W = Math.min(Dimensions.get('window').width - 32, 400);
-const CHART_H = 200;
+const MENU: { kind: AnalyticsFeatureKind; title: string; blurb: string }[] = [
+  {
+    kind: 'gaussian',
+    title: 'Gaussian',
+    blurb: 'Normal distribution ng suma at log(product) mula sa lahat ng winning draws (sheet DB).',
+  },
+  {
+    kind: 'cooccurrence',
+    title: 'Co-occurrence',
+    blurb: 'Network ng mga digit na madalas magkasabay sa iisang draw.',
+  },
+  {
+    kind: 'cross_draw',
+    title: 'Cross-draw',
+    blurb: 'Mga transisyon ng digit sa magkakasunod na draws (may direksyon).',
+  },
+];
 
-export function AnalyticsScreen(_props: Props): React.ReactElement {
-  const [filter, setFilter] = useState<string | null>(null);
-  const [data, setData] = useState<AnalyticsDashboard | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+const BG_TOP = '#0d1b2e';
+const BG_BOTTOM = '#050a12';
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const d = await fetchAnalyticsDashboard(filter);
-      setData(d);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to load');
-    } finally {
-      setLoading(false);
-    }
-  }, [filter]);
+const logoSource = require('../../assets/Logo.png');
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+export function AnalyticsScreen({ navigation }: Props): React.ReactElement {
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const gutter = width < 380 ? 16 : 20;
 
-  const gaussPts = useMemo(() => {
-    if (!data?.gaussian_scatter?.length) return [];
-    const pts = data.gaussian_scatter;
-    const sums = pts.map((p) => p.sum);
-    const logs = pts.map((p) => p.log_product);
-    const smin = Math.min(...sums);
-    const smax = Math.max(...sums);
-    const lmin = Math.min(...logs);
-    const lmax = Math.max(...logs);
-    const sr = smax - smin || 1;
-    const lr = lmax - lmin || 1;
-    return pts.map((p) => ({
-      left: ((p.sum - smin) / sr) * (W - 8),
-      top: CHART_H - 8 - ((p.log_product - lmin) / lr) * (CHART_H - 16),
-    }));
-  }, [data]);
-
-  const errMax = useMemo(() => {
-    if (!data?.error_histogram) return 1;
-    return Math.max(1, ...Object.values(data.error_histogram));
-  }, [data]);
-
-  const coocMax = useMemo(() => {
-    if (!data?.cooccurrence_matrix?.length) return 1;
-    let m = 0;
-    for (const row of data.cooccurrence_matrix) {
-      for (const v of row) m = Math.max(m, v);
-    }
-    return m || 1;
-  }, [data]);
+  const cardShadow = Platform.select({
+    ios: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.35,
+      shadowRadius: 14,
+    },
+    android: { elevation: 6 },
+    default: {},
+  });
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.pad}>
-      <Title style={styles.title}>Analytics</Title>
-      <Paragraph style={styles.sub}>
-        Gaussian-style scatter (sum vs log product), error histogram (nakaimbak sa database), co-occurrence at cross-draw transitions.
-      </Paragraph>
-      <View style={styles.filters}>
-        {(['Lahat', '9am', '4pm', '9pm'] as const).map((label) => {
-          const val = label === 'Lahat' ? null : label;
-          const active = filter === val;
-          return (
-            <Button
-              key={label}
-              mode={active ? 'contained' : 'outlined'}
-              compact
-              onPress={() => setFilter(val)}
-              buttonColor={active ? '#2f855a' : undefined}
-              textColor={active ? '#f5fff5' : '#1f5130'}
-              style={styles.filterBtn}
+    <View style={styles.root}>
+      <LinearGradient
+        colors={[BG_TOP, BG_BOTTOM]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingHorizontal: gutter,
+            paddingTop: Math.max(8, insets.top > 0 ? 4 : 12),
+            paddingBottom: Math.max(28, insets.bottom + 20),
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.logoWrap} accessibilityRole="image" accessibilityLabel="Swerte3 logo">
+          <Image source={logoSource} style={styles.logo} resizeMode="contain" />
+        </View>
+        <Text style={styles.head}>Analytics</Text>
+
+        {MENU.map((item, index) => (
+          <Pressable
+            key={item.kind}
+            onPress={() => navigation.navigate('AnalyticsFeature', { kind: item.kind })}
+            style={({ pressed }) => [
+              styles.card,
+              cardShadow,
+              pressed && styles.cardPressed,
+              index === 0 && styles.cardFirst,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel={item.title}
+          >
+            <LinearGradient
+              colors={['rgba(30, 58, 95, 0.55)', 'rgba(15, 27, 46, 0.92)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.cardGradient}
             >
-              {label}
-            </Button>
-          );
-        })}
-      </View>
-      {loading ? <ActivityIndicator size="large" color="#2f855a" style={styles.loader} /> : null}
-      {err ? <Paragraph style={styles.error}>{err}</Paragraph> : null}
-      {data && !loading ? (
-        <>
-          <Paragraph style={styles.meta}>Naka-save na outcome rows (prediction vs actual): {data.outcome_rows}</Paragraph>
-
-          <Text style={styles.section}>Gaussian-style: sum vs log(product)</Text>
-          <View style={[styles.chartBox, { width: W, height: CHART_H }]}>
-            {gaussPts.map((p, i) => (
-              <View key={i} style={[styles.dot, { left: p.left, top: p.top }]} />
-            ))}
-          </View>
-
-          <Text style={styles.section}>Error analysis (Hamming distance)</Text>
-          <View style={styles.barRow}>
-            {(['0', '1', '2', '3'] as const).map((k) => {
-              const v = data.error_histogram[k] ?? 0;
-              const h = (v / errMax) * 120;
-              return (
-                <View key={k} style={styles.barCol}>
-                  <View style={[styles.bar, { height: Math.max(4, h) }]} />
-                  <Text style={styles.barLabel}>{k}</Text>
-                  <Text style={styles.barCount}>{v}</Text>
-                </View>
-              );
-            })}
-          </View>
-
-          <Text style={styles.section}>Co-occurrence (digits sa iisang draw)</Text>
-          <View style={styles.matrix}>
-            {data.cooccurrence_matrix.map((row, i) => (
-              <View key={i} style={styles.matrixRow}>
-                {row.map((cell, j) => (
-                  <View
-                    key={j}
-                    style={[
-                      styles.cell,
-                      {
-                        backgroundColor: `rgba(47, 133, 90, ${0.15 + (cell / coocMax) * 0.85})`,
-                      },
-                    ]}
-                  />
-                ))}
+              <View style={styles.accent} />
+              <View style={styles.cardInner}>
+                <Text style={styles.cardTitle}>{item.title}</Text>
+                <Text style={styles.cardBlurb}>{item.blurb}</Text>
+                <Text style={styles.cardGo}>Buksan →</Text>
               </View>
-            ))}
-          </View>
+            </LinearGradient>
+          </Pressable>
+        ))}
 
-          <Text style={styles.section}>Cross-draw transition (9AM sample)</Text>
-          <View style={styles.edgeList}>
-            {(data.transitions['9am'] ?? []).slice(0, 12).map((e, i) => (
-              <Text key={i} style={styles.edge}>
-                {e.from} → {e.to} ({e.weight})
-              </Text>
-            ))}
-          </View>
-        </>
-      ) : null}
-    </ScrollView>
+        <Text style={styles.disclaimer}>
+          Pampasiyasat lamang — hindi garantiya ng resulta. Ang Cognitive challenge ay hiwalay na laro;
+          walang automated na triple na kinukumpara sa lottery draws.
+        </Text>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#dff1de' },
-  pad: { padding: 16, paddingBottom: 48 },
-  title: { fontSize: 24, fontWeight: '800', color: '#113526' },
-  sub: { color: '#2b4f3a', marginBottom: 10, lineHeight: 20 },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
-  filterBtn: { marginRight: 4 },
-  loader: { marginVertical: 24 },
-  error: { color: '#9c2f2f' },
-  meta: { color: '#3d6b4d', marginBottom: 12 },
-  section: { fontWeight: '700', color: '#173726', marginTop: 16, marginBottom: 8 },
-  chartBox: {
-    backgroundColor: '#f3fff1',
-    borderRadius: 12,
+  root: {
+    flex: 1,
+    backgroundColor: BG_BOTTOM,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    alignItems: 'stretch',
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+  },
+  logoWrap: {
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+  },
+  logo: {
+    width: 96,
+    height: 96,
+  },
+  head: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#f8fafc',
+    letterSpacing: -0.5,
+    marginBottom: 20,
+    alignSelf: 'flex-start',
+  },
+  card: {
+    marginBottom: 12,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#b8dfb9',
-    position: 'relative',
-    marginBottom: 8,
+    borderColor: 'rgba(125, 211, 252, 0.14)',
+    overflow: 'hidden',
   },
-  dot: {
+  cardFirst: {
+    marginTop: 0,
+  },
+  cardPressed: {
+    opacity: 0.88,
+    transform: [{ scale: 0.992 }],
+  },
+  cardGradient: {
+    borderRadius: 17,
+    overflow: 'hidden',
+  },
+  accent: {
     position: 'absolute',
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: '#2f855a',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: ANALYTICS_CYAN,
+    opacity: 0.55,
   },
-  barRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 12, height: 140, marginBottom: 8 },
-  barCol: { alignItems: 'center', flex: 1 },
-  bar: { width: '70%', backgroundColor: '#2f855a', borderRadius: 4 },
-  barLabel: { fontSize: 12, marginTop: 4, color: '#214635' },
-  barCount: { fontSize: 11, color: '#3d6b4d' },
-  matrix: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#a8d9ae' },
-  matrixRow: { flexDirection: 'row' },
-  cell: { width: 14, height: 14, margin: 0.5 },
-  edgeList: { backgroundColor: '#f3fff1', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#b8dfb9' },
-  edge: { fontSize: 12, color: '#173726', marginBottom: 4, fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }) },
+  cardInner: {
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    paddingLeft: 20,
+  },
+  cardTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#f1f5f9',
+    marginBottom: 8,
+    letterSpacing: -0.2,
+  },
+  cardBlurb: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: ANALYTICS_MUTED,
+    marginBottom: 14,
+  },
+  cardGo: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: ANALYTICS_GOLD,
+    letterSpacing: 0.3,
+  },
+  disclaimer: {
+    marginTop: 16,
+    fontSize: 11,
+    lineHeight: 17,
+    color: 'rgba(148, 163, 184, 0.55)',
+    alignSelf: 'stretch',
+  },
 });

@@ -9,6 +9,7 @@ import { AuthScreen } from '../screens/AuthScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
 import { PictureAnalysisScreen } from '../screens/PictureAnalysisScreen';
 import { MathAlgoScreen } from '../screens/MathAlgoScreen';
+import { AnalyticsFeatureScreen, analyticsFeatureTitle } from '../screens/AnalyticsFeatureScreen';
 import { AnalyticsScreen } from '../screens/AnalyticsScreen';
 import type { RootStackParamList } from './types';
 
@@ -79,7 +80,26 @@ export function RootNavigator(): React.ReactElement {
             headerShadowVisible: false,
           }}
         />
-        <Stack.Screen name="Analytics" component={AnalyticsScreen} options={{ title: 'Analytics' }} />
+        <Stack.Screen
+          name="Analytics"
+          component={AnalyticsScreen}
+          options={{
+            title: 'Analytics',
+            headerStyle: { backgroundColor: '#0a1628' },
+            headerTintColor: '#e2e8f0',
+            headerShadowVisible: false,
+          }}
+        />
+        <Stack.Screen
+          name="AnalyticsFeature"
+          component={AnalyticsFeatureScreen}
+          options={({ route }) => ({
+            title: analyticsFeatureTitle(route.params.kind),
+            headerStyle: { backgroundColor: '#0a1628' },
+            headerTintColor: '#e2e8f0',
+            headerShadowVisible: false,
+          })}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

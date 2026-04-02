@@ -1,3 +1,5 @@
+export type AnalyticsFeatureKind = 'gaussian' | 'error_distance' | 'cooccurrence' | 'cross_draw';
+
 export type RootStackParamList = {
   Home: undefined;
   Predict: undefined;
@@ -6,4 +8,5 @@ export type RootStackParamList = {
   PictureAnalysis: undefined;
   MathAlgo: undefined;
   Analytics: undefined;
+  AnalyticsFeature: { kind: AnalyticsFeatureKind };
 };

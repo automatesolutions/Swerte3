@@ -162,11 +162,61 @@ export async function requestOtp(phone: string): Promise<void> {
 
 export type TokenPair = { access_token: string; refresh_token: string; token_type: string };
 
+export type AnalyticsBivariatePoint = { sum: number; log_product: number; session?: string };
+
+/** 1D normalization: histograms + scaled normal PDF for digit sum and log(product). */
+export type AnalyticsGaussianPayload = {
+  draws_sampled: number;
+  mean_sum: number;
+  std_sum: number;
+  mean_log_product: number;
+  std_log_product: number;
+  correlation: number;
+  sum_histogram: number[];
+  sum_normal_curve: { x: number; y: number }[];
+  log_histogram: number[];
+  log_histogram_range: { min: number; max: number; bins: number };
+  log_normal_curve: { x: number; y: number }[];
+  gaussian_scatter?: AnalyticsBivariatePoint[];
+};
+
+export type AnalyticsGraphLink = { source: string; target: string; weight: number };
+
+export type AnalyticsCooccurrenceGraph = {
+  nodes: { id: string }[];
+  links: AnalyticsGraphLink[];
+  draws_sampled: number;
+  links_shown: number;
+  pair_types_available?: number;
+};
+
+export type AnalyticsCrossDrawGraph = {
+  nodes: { id: string }[];
+  links: AnalyticsGraphLink[];
+  session: string;
+  draws_sampled: number;
+  links_shown: number;
+  pair_types_in_data?: number;
+};
+
+export type AnalyticsErrorSeriesPoint = {
+  t: string;
+  session: string;
+  alon_xgb: number;
+  alon_markov: number;
+  lihim_miro: number | null;
+  cognitive: number | null;
+};
+
 export type AnalyticsDashboard = {
   gaussian_scatter: { sum: number; log_product: number; session: string }[];
+  gaussian?: AnalyticsGaussianPayload;
   cooccurrence_matrix: number[][];
+  cooccurrence_graph?: AnalyticsCooccurrenceGraph;
+  cross_draw_graphs?: Record<string, AnalyticsCrossDrawGraph>;
   transitions: Record<string, { from: string; to: string; weight: number }[]>;
   error_histogram: Record<string, number>;
+  error_series?: AnalyticsErrorSeriesPoint[];
   outcome_rows: number;
 };
 
@@ -200,7 +250,7 @@ export type DailyMathCognitive = {
   title_tagalog?: string | null;
   question_number?: number;
   instruction_tagalog: string;
-  /** False after one guess submitted today (Manila calendar day). */
+  /** False after one guess submitted for the app's calendar day. */
   allow_guess?: boolean;
 };
 
