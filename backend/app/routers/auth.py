@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.auth import OTPRequest, OTPVerify, RefreshRequest, TokenResponse
 from app.services.jwt_service import create_access_token, create_refresh_token, decode_token
-from app.services.otp_service import get_or_create_user, issue_otp, normalize_phone, verify_otp
+from app.services.otp_service import (
+    INVALID_PHONE_HINT,
+    get_or_create_user,
+    issue_otp,
+    normalize_phone,
+    verify_otp,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -19,7 +25,7 @@ _OTP_COOLDOWN_SEC = 30.0
 def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
     phone = normalize_phone(body.phone)
     if not phone:
-        raise HTTPException(status_code=400, detail="Invalid phone number")
+        raise HTTPException(status_code=400, detail=f"Invalid phone number. {INVALID_PHONE_HINT}")
     now = time()
     last = _otp_last_request.get(phone)
     if last is not None and now - last < _OTP_COOLDOWN_SEC:
@@ -36,7 +42,7 @@ def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
 def verify(body: OTPVerify, db: Session = Depends(get_db)):
     phone = normalize_phone(body.phone)
     if not phone:
-        raise HTTPException(status_code=400, detail="Invalid phone number")
+        raise HTTPException(status_code=400, detail=f"Invalid phone number. {INVALID_PHONE_HINT}")
     if not verify_otp(db, phone, body.code.strip()):
         raise HTTPException(status_code=401, detail="Invalid or expired code")
     user = get_or_create_user(db, phone)

@@ -5,8 +5,9 @@ import hashlib
 import hmac
 import random
 import re
+import unicodedata
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Union
 
 from sqlalchemy.orm import Session
 
@@ -15,9 +16,24 @@ from app.models.otp import OTPChallenge
 from app.models.user import User
 
 
-def normalize_phone(phone_raw: str) -> Optional[str]:
-    """Very light normalization to a canonical key (not full E.164 validation)."""
-    d = re.sub(r"\D+", "", phone_raw or "")
+INVALID_PHONE_HINT = (
+    "Use a Philippine mobile with at least 10 digits, e.g. 09171234567 or 9171234567 "
+    "(JSON body: {\"phone\": \"09171234567\"}, Content-Type: application/json)."
+)
+
+
+def normalize_phone(phone_raw: Optional[Union[str, int]]) -> Optional[str]:
+    """Normalize to +63… E.164-style key (light validation, PH-focused)."""
+    if phone_raw is None:
+        return None
+    if isinstance(phone_raw, int):
+        phone_raw = str(phone_raw)
+    if not isinstance(phone_raw, str):
+        return None
+    s = unicodedata.normalize("NFKC", phone_raw.strip())
+    if not s or s.lower() in {"null", "none", "undefined", ""}:
+        return None
+    d = re.sub(r"\D+", "", s)
     if len(d) < 10:
         return None
     if d.startswith("63"):

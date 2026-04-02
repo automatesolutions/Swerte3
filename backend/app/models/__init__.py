@@ -4,7 +4,10 @@ from app.models.draw import Draw, DrawSession, IngestionRun
 from app.models.user import User
 from app.models.otp import OTPChallenge
 from app.models.prediction import PredictionRecord
+from app.models.prediction_outcome import PredictionOutcome
 from app.models.payment import PaymentEvent
+from app.models.daily_picture_analysis import DailyPictureAnalysis
+from app.models.daily_math_cognitive import DailyMathCognitive
 
 __all__ = [
     "Draw",
@@ -13,5 +16,8 @@ __all__ = [
     "User",
     "OTPChallenge",
     "PredictionRecord",
+    "PredictionOutcome",
     "PaymentEvent",
+    "DailyPictureAnalysis",
+    "DailyMathCognitive",
 ]

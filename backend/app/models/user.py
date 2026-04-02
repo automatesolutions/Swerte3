@@ -19,6 +19,7 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     phone_e164: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    premium_credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     premium_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

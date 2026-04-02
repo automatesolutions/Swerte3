@@ -2,7 +2,13 @@ from pydantic import BaseModel, Field
 
 
 class OTPRequest(BaseModel):
-    phone: str = Field(..., min_length=8, max_length=20)
+    phone: str = Field(
+        ...,
+        min_length=8,
+        max_length=32,
+        examples=["09171234567"],
+        description="PH mobile; digits only or with spaces/dashes ok.",
+    )
 
 
 class OTPVerify(BaseModel):

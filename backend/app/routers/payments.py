@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -21,11 +20,8 @@ def _grant_premium(db: Session, user_id: int) -> None:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return
-    days = get_settings().premium_grant_days_per_payment
-    base = user.premium_until or datetime.now(timezone.utc)
-    if base < datetime.now(timezone.utc):
-        base = datetime.now(timezone.utc)
-    user.premium_until = base + timedelta(days=days)
+    n = get_settings().premium_credits_per_payment
+    user.premium_credits = (user.premium_credits or 0) + n
     db.commit()
 
 

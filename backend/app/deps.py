@@ -1,21 +1,29 @@
 """FastAPI dependencies."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Annotated, Optional
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.user import User
 from app.services.jwt_service import verify_access_token
 
+# auto_error=False: optional auth for /predict/free; OpenAPI shows a single "Authorize" JWT scheme.
+_http_bearer_optional = HTTPBearer(auto_error=False)
 
-def get_bearer_token(authorization: Annotated[Optional[str], Header()] = None) -> Optional[str]:
-    if not authorization or not authorization.lower().startswith("bearer "):
+
+def get_bearer_token(
+    credentials: Annotated[
+        Optional[HTTPAuthorizationCredentials],
+        Depends(_http_bearer_optional),
+    ],
+) -> Optional[str]:
+    if credentials is None:
         return None
-    return authorization.split(" ", 1)[1].strip()
+    return credentials.credentials.strip()
 
 
 def get_current_user_optional(
@@ -43,10 +51,9 @@ def get_current_user(
 
 
 def require_premium(user: User) -> User:
-    pu = user.premium_until
-    if not pu or pu <= datetime.now(timezone.utc):
+    if (user.premium_credits or 0) < 1:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="Premium subscription required",
+            detail="No premium predictions left. Complete payment to add credits (₱2 per prediction).",
         )
     return user

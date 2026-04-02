@@ -3,4 +3,7 @@ export type RootStackParamList = {
   Predict: undefined;
   Auth: undefined;
   Paywall: undefined;
+  PictureAnalysis: undefined;
+  MathAlgo: undefined;
+  Analytics: undefined;
 };

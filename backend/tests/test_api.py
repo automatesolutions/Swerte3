@@ -28,3 +28,21 @@ def test_premium_requires_auth():
     with TestClient(app) as client:
         r = client.get("/api/predict/premium", params={"session": "9am"})
     assert r.status_code == 401
+
+
+def test_picture_analysis_daily_requires_auth():
+    with TestClient(app) as client:
+        r = client.get("/api/picture-analysis/daily")
+    assert r.status_code == 401
+
+
+def test_math_cognitive_daily_requires_auth():
+    with TestClient(app) as client:
+        r = client.get("/api/math-cognitive/daily")
+    assert r.status_code == 401
+
+
+def test_math_cognitive_guess_requires_auth():
+    with TestClient(app) as client:
+        r = client.post("/api/math-cognitive/daily/guess", json={"guess": "1"})
+    assert r.status_code == 401

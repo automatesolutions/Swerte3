@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model_name: str = "gpt-4o-mini"
 
+    # Daily "Litrato" puzzle (OpenAI Images). Cheapest: dall-e-2 @ 256x256 (~$0.016/image).
+    openai_image_api_key: str = ""
+    openai_image_base_url: str = "https://api.openai.com/v1"
+    openai_image_model: str = "dall-e-2"
+    openai_image_size: str = "256x256"
+
     sms_provider: str = "console"
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
@@ -46,7 +52,7 @@ class Settings(BaseSettings):
     # Protect /ingest and similar (optional)
     admin_api_key: str = ""
 
-    premium_grant_days_per_payment: int = 30
+    premium_credits_per_payment: int = 1
 
     @property
     def cors_origins_list(self) -> List[str]:

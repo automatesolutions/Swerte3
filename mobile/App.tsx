@@ -8,8 +8,15 @@ const theme = {
   ...MD3LightTheme,
   colors: {
     ...MD3LightTheme.colors,
-    primary: '#0d47a1',
-    secondary: '#ff6f00',
+    primary: '#1e3a5f',
+    secondary: '#c2410c',
+    secondaryContainer: '#ffedd5',
+    onSecondaryContainer: '#431407',
+    background: '#f1f5f9',
+    elevation: {
+      ...MD3LightTheme.colors.elevation,
+      level1: '#ffffff',
+    },
   },
 };
 
@@ -18,7 +25,7 @@ export default function App(): React.ReactElement {
     <SafeAreaProvider>
       <PaperProvider theme={theme}>
         <RootNavigator />
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
       </PaperProvider>
     </SafeAreaProvider>
   );

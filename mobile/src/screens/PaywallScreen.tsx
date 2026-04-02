@@ -15,8 +15,8 @@ export function PaywallScreen({ navigation }: Props): React.ReactElement {
         <Card.Content>
           <Title>₱2 unlock</Title>
           <Paragraph>
-            Complete PayMongo checkout on the web or wire the native SDK. After payment, the webhook grants premium_until on
-            your user (metadata user_id).
+            Complete PayMongo checkout on the web or wire the native SDK. After payment, the webhook adds premium prediction
+            credits on your user (metadata user_id)—one credit per successful payment (₱2 each).
           </Paragraph>
           <Button
             mode="contained"

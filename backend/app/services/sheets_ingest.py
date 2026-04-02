@@ -11,12 +11,27 @@ from urllib.parse import quote
 
 import httpx
 import pandas as pd
+from sqlalchemy import select
 
 from app.config import Settings, get_settings
 from app.models.draw import Draw, DrawSession, IngestionRun
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_col_key(name: str) -> str:
+    return str(name).strip().upper().replace("_", " ")
+
+
+def _resolve_column(df: pd.DataFrame, configured: str, aliases: list[str]) -> Optional[str]:
+    wanted = [_normalize_col_key(configured), *[_normalize_col_key(a) for a in aliases]]
+    mapped = {_normalize_col_key(c): c for c in df.columns}
+    for w in wanted:
+        if w in mapped:
+            return mapped[w]
+    return None
+
 
 def _normalize_tab_key(tab: str) -> str:
     return tab.strip().upper().replace(" ", "")
@@ -128,10 +143,19 @@ def ingest_tab(
         logger.exception("Sheet fetch failed for %s", tab_name)
         return 0, 0, [str(e)]
 
-    date_col = settings.sheet_col_date
-    res_col = settings.sheet_col_result
-    if date_col not in df.columns or res_col not in df.columns:
-        return 0, 0, [f"Missing columns need {date_col!r} and {res_col!r}; got {list(df.columns)}"]
+    date_col = _resolve_column(df, settings.sheet_col_date, ["DRAW DATE", "DATE"])
+    res_col = _resolve_column(df, settings.sheet_col_result, ["COMBINATIONS", "RESULT", "COMBINATION"])
+    if not date_col or not res_col:
+        return 0, 0, [
+            (
+                "Missing required columns. Tried date aliases "
+                f"{[settings.sheet_col_date, 'DRAW DATE', 'DATE']} and result aliases "
+                f"{[settings.sheet_col_result, 'COMBINATIONS', 'RESULT', 'COMBINATION']}; got {list(df.columns)}"
+            )
+        ]
+
+    # Track existing + newly-added hashes to avoid duplicate inserts in one ingest run.
+    existing_hashes = set(db.scalars(select(Draw.source_row_hash).where(Draw.session == session)).all())
 
     inserted = 0
     skipped = 0
@@ -143,8 +167,7 @@ def ingest_tab(
             continue
         d1, d2, d3 = triple
         h = row_hash(session, draw_at, d1, d2, d3)
-        exists = db.query(Draw).filter(Draw.source_row_hash == h).first()
-        if exists:
+        if h in existing_hashes:
             skipped += 1
             continue
         db.add(
@@ -158,6 +181,7 @@ def ingest_tab(
                 raw_result=str(row.get(res_col)),
             )
         )
+        existing_hashes.add(h)
         inserted += 1
     return inserted, skipped, []
 
