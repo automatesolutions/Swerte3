@@ -115,6 +115,7 @@ export type PremiumPrediction = FreePrediction & {
   tier?: string;
   miro?: { digits?: number[]; error?: string };
   council?: unknown;
+  agent_enrichment?: Record<string, unknown>;
 };
 
 export type DailyPredictionResponse = {
@@ -143,6 +144,17 @@ export function fetchPremiumPrediction(session: DrawSession, token: string): Pro
   return getJson<PremiumPrediction>(`/api/predict/premium?${q.toString()}`, { token });
 }
 
+export type PremiumStartResult = {
+  premium_credits: number;
+  lihim_unlocked: boolean;
+  charged: boolean;
+};
+
+/** GINTO: always spends 1 token; then 9AM/4PM/9PM premium GETs do not deduct until next GINTO. */
+export function startPremiumBatch(token: string): Promise<PremiumStartResult> {
+  return postJson<PremiumStartResult>('/api/predict/premium/start', {}, { token });
+}
+
 export function fetchDailyPredictions(targetDate: string, variationKey?: string): Promise<DailyPredictionResponse> {
   const q = new URLSearchParams({ target_date: targetDate });
   if (variationKey) q.set('variation_key', variationKey);
@@ -161,6 +173,29 @@ export async function requestOtp(phone: string): Promise<void> {
 }
 
 export type TokenPair = { access_token: string; refresh_token: string; token_type: string };
+
+export type UserMe = { phone: string; premium_credits: number; lihim_unlocked?: boolean };
+
+export function fetchUserMe(token: string): Promise<UserMe> {
+  return getJson<UserMe>('/api/auth/me', { token });
+}
+
+export type WalletProvider = 'gcash' | 'maya' | 'gotyme';
+
+export type PurchaseTokensResult = {
+  provider: WalletProvider;
+  amount_pesos: number;
+  tokens_added: number;
+  premium_credits: number;
+};
+
+export function purchaseTokens(token: string, provider: WalletProvider, amountPesos: number): Promise<PurchaseTokensResult> {
+  return postJson<PurchaseTokensResult>(
+    '/api/payments/topup',
+    { provider, amount_pesos: amountPesos },
+    { token },
+  );
+}
 
 export type AnalyticsBivariatePoint = { sum: number; log_product: number; session?: string };
 

@@ -240,17 +240,6 @@ export function PictureAnalysisScreen(_props: Props): React.ReactElement {
             >
               <View style={styles.modalRoot}>
                 <SafeAreaView style={styles.modalSafe} edges={['top', 'bottom']}>
-                  <View style={styles.modalHeader}>
-                    <Pressable
-                      onPress={() => setImageExpanded(false)}
-                      style={({ pressed }) => [styles.modalCloseBtn, pressed && styles.modalClosePressed]}
-                      accessibilityRole="button"
-                      accessibilityLabel="Isara ang malaking larawan"
-                    >
-                      <Ionicons name="close" size={22} color="#ecfdf5" />
-                      <Text style={styles.modalCloseText}> Isara</Text>
-                    </Pressable>
-                  </View>
                   <ScrollView
                     style={styles.modalScroll}
                     contentContainerStyle={styles.modalScrollContent}
@@ -280,6 +269,17 @@ export function PictureAnalysisScreen(_props: Props): React.ReactElement {
                       />
                     </View>
                   </ScrollView>
+                  <View style={styles.modalBottomBar}>
+                    <Pressable
+                      onPress={() => setImageExpanded(false)}
+                      style={({ pressed }) => [styles.modalDismissCta, pressed && styles.modalDismissCtaPressed]}
+                      accessibilityRole="button"
+                      accessibilityLabel="Bumalik sa normal na Litrato"
+                    >
+                      <Ionicons name="contract-outline" size={22} color="#ecfdf5" />
+                      <Text style={styles.modalDismissCtaText}>Bumalik sa normal na larawan</Text>
+                    </Pressable>
+                  </View>
                 </SafeAreaView>
               </View>
             </Modal>
@@ -417,22 +417,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.94)',
   },
   modalSafe: { flex: 1 },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 10,
-    paddingBottom: 6,
-  },
-  modalCloseBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  modalClosePressed: { opacity: 0.75 },
-  modalCloseText: { color: '#ecfdf5', fontWeight: '800', fontSize: 15 },
   modalScroll: { flex: 1 },
   modalScrollContent: {
     flexGrow: 1,
@@ -447,6 +431,35 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.35)',
     backgroundColor: '#020617',
+  },
+  modalBottomBar: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 6,
+    backgroundColor: 'rgba(0,0,0,0.82)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.22)',
+  },
+  modalDismissCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    minHeight: 52,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 16,
+    backgroundColor: 'rgba(22,163,74,0.35)',
+    borderWidth: 2,
+    borderColor: 'rgba(134,239,172,0.55)',
+  },
+  modalDismissCtaPressed: { opacity: 0.9 },
+  modalDismissCtaText: {
+    color: '#ecfdf5',
+    fontWeight: '900',
+    fontSize: 16,
+    textAlign: 'center',
+    flexShrink: 1,
   },
   hintCard: {
     alignSelf: 'center',

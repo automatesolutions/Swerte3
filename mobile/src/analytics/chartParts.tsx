@@ -120,6 +120,8 @@ type ForceGraphProps = {
   nodeBorder: string;
   layout?: ForceGraphLayout;
   zoomable?: boolean;
+  edgeStyle?: 'solid' | 'dotted';
+  edgeThickness?: 'normal' | 'thin';
 };
 
 const GRAPH_FOOTER_H = 44;
@@ -134,6 +136,8 @@ export function ForceGraphView({
   nodeBorder,
   layout = 'compact',
   zoomable = false,
+  edgeStyle = 'solid',
+  edgeThickness = 'normal',
 }: ForceGraphProps): React.ReactElement {
   const ids = useMemo(() => nodes.map((n) => n.id), [nodes]);
   const plotH = Math.max(100, height - GRAPH_FOOTER_H - (zoomable ? ZOOM_BAR_H : 0));
@@ -302,6 +306,9 @@ export function ForceGraphView({
               const stroke = incident ? nodeBorder : 'rgba(125,211,252,0.92)';
               const baseOp = 0.78 + t * 0.22;
               const opacity = fadeOthers ? (incident ? 1 : 0.12) : baseOp;
+              const thin = edgeThickness === 'thin';
+              const normalW = thin ? Math.min(2.2, 0.65 + t * 1.15) : Math.min(3.4, 1.05 + t * 2.05);
+              const selectedW = thin ? Math.min(2.8, 0.9 + t * 1.45) : Math.min(4.2, 1.5 + t * 2.1);
               return (
                 <Line
                   key={`${l.source}-${l.target}-${i}`}
@@ -311,11 +318,8 @@ export function ForceGraphView({
                   y2={b.y}
                   stroke={stroke}
                   strokeLinecap="round"
-                  strokeWidth={
-                    incident
-                      ? Math.min(4.2, 1.5 + t * 2.1)
-                      : Math.min(3.4, 1.05 + t * 2.05)
-                  }
+                  strokeWidth={incident ? selectedW : normalW}
+                  strokeDasharray={edgeStyle === 'dotted' ? (incident ? '2.5 5' : '2 5') : undefined}
                   opacity={opacity}
                 />
               );

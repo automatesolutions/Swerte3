@@ -267,6 +267,29 @@ export function AnalyticsFeatureScreen({ route, navigation }: Props): React.Reac
                 {cooc.draws_sampled.toLocaleString()} draws sampled.
               </Text>
             ) : null}
+            <Text style={styles.explainHeading}>What this analytics is</Text>
+            <Text style={styles.explainBody}>
+              <Text style={styles.explainStrong}>Co-occurrence</Text> answers: “which digits tend to show
+              up <Text style={styles.explainStrong}>in the same draw</Text>” (the same 3-digit result).
+              For each historical draw we take the three digits and add counts for the three unique pairs
+              among them (e.g. 8-2-9 adds pairs 8–2, 8–9, 2–9). The chart keeps the{' '}
+              <Text style={styles.explainStrong}>strongest pairs</Text> so the web is readable.
+            </Text>
+            <Text style={styles.explainHeading}>How to read this chart</Text>
+            <Text style={styles.explainBody}>
+              • Digits <Text style={styles.explainStrong}>0–9</Text> are nodes.{'\n'}• A link between
+              two digits means they appeared together in the same result relatively often;{' '}
+              <Text style={styles.explainStrong}>stronger / more visible</Text> links ≈ higher counts.{' '}
+              {'\n'}• <Text style={styles.explainStrong}>Tap</Text> a digit to highlight its partners and
+              see weights below; drag nodes or use zoom to explore.{'\n'}• This is{' '}
+              <Text style={styles.explainStrong}>historical co-occurrence only</Text> — not a forecast.
+            </Text>
+            <Text style={styles.explainHeading}>Not the same as Cross-draw</Text>
+            <Text style={[styles.explainBody, { marginBottom: 12 }]}>
+              <Text style={styles.explainStrong}>Cross-draw transitions</Text> (other screen) track
+              digits across <Text style={styles.explainStrong}>consecutive draws</Text> (draw N → N+1).
+              This Co-occurrence screen is only about digits sharing one draw.
+            </Text>
             {cooc && cooc.links.length ? (
               <>
                 <View style={styles.graphBox}>
@@ -288,11 +311,31 @@ export function AnalyticsFeatureScreen({ route, navigation }: Props): React.Reac
         ) : null}
 
         {!loading && data && kind === 'cross_draw' ? (
-          <View style={styles.card}>
+          <View style={[styles.card, styles.cardCross]}>
             <Text style={styles.cardTitle}>Cross-draw transitions</Text>
             <Text style={styles.cardSub}>
               Direksyon: digit sa draw N → digit sa draw N+1 (parehong session). Pinakamataas na
               frequency.
+            </Text>
+            <Text style={styles.explainHeading}>What this analytics is</Text>
+            <Text style={styles.explainBody}>
+              <Text style={styles.explainStrong}>Cross-draw transitions</Text> count how often a digit
+              from one result (draw N) shows up together with a digit from the next result (draw N+1) in
+              the{' '}
+              <Text style={styles.explainStrong}>same session</Text> (9am, 4pm, or 9pm). The app
+              compares every digit in draw N with every digit in draw N+1, then merges{' '}
+              <Text style={styles.explainStrong}>all sessions</Text> into one network. Lines shown are
+              the strongest patterns (highest frequencies) in your sampled history.
+            </Text>
+            <Text style={styles.explainHeading}>How to read the chart</Text>
+            <Text style={styles.explainBody}>
+              • <Text style={styles.explainStrong}>Circles (0–9)</Text> are digits.{'\n'}•{' '}
+              <Text style={styles.explainStrong}>Dotted lines</Text> connect digits that often appear
+              across consecutive draws; bolder or more visible links mean higher counts.{'\n'}• Tap a
+              digit to <Text style={styles.explainStrong}>highlight</Text> its links and see weights at
+              the bottom. Drag nodes to untangle; use +/− and pan when zoomed.{'\n'}• This is{' '}
+              <Text style={styles.explainStrong}>historical structure only</Text> — it does not predict
+              future draws.
             </Text>
             {crossCombined ? (
               <>
@@ -310,6 +353,8 @@ export function AnalyticsFeatureScreen({ route, navigation }: Props): React.Reac
                     nodeBorder={ANALYTICS_CYAN}
                     layout="spread"
                     zoomable
+                    edgeStyle="dotted"
+                    edgeThickness="thin"
                   />
                 </View>
               </>
@@ -362,8 +407,23 @@ const styles = StyleSheet.create({
   },
   cardGaussian: { alignSelf: 'center', width: '100%', maxWidth: 440 },
   cardCooc: { alignSelf: 'center', width: '100%', maxWidth: 440 },
+  cardCross: { alignSelf: 'center', width: '100%', maxWidth: 440 },
   cardTitle: { fontSize: 17, fontWeight: '800', color: '#f8fafc', marginBottom: 8 },
   cardSub: { fontSize: 13, lineHeight: 20, color: ANALYTICS_MUTED, marginBottom: 10 },
+  explainHeading: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#e2e8f0',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  explainBody: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: ANALYTICS_MUTED,
+    marginBottom: 10,
+  },
+  explainStrong: { color: '#cbd5e1', fontWeight: '700' },
   meta: { fontSize: 12, color: 'rgba(148, 163, 184, 0.95)', marginBottom: 10 },
   muted: { fontSize: 13, color: ANALYTICS_MUTED, lineHeight: 20 },
   hint: { fontSize: 12, color: ANALYTICS_GOLD, marginBottom: 10 },

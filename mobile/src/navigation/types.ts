@@ -2,6 +2,7 @@ export type AnalyticsFeatureKind = 'gaussian' | 'error_distance' | 'cooccurrence
 
 export type RootStackParamList = {
   Home: undefined;
+  LihimPremium: undefined;
   Predict: undefined;
   Auth: undefined;
   Paywall: undefined;

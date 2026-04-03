@@ -5,6 +5,8 @@ from jose import JWTError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.deps import get_current_user
+from app.models.user import User
 from app.schemas.auth import OTPRequest, OTPVerify, RefreshRequest, TokenResponse
 from app.services.jwt_service import create_access_token, create_refresh_token, decode_token
 from app.services.otp_service import (
@@ -16,6 +18,16 @@ from app.services.otp_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.get("/me")
+def read_me(user: User = Depends(get_current_user)):
+    """Current user wallet fields for the mobile home screen."""
+    return {
+        "phone": user.phone_e164,
+        "premium_credits": int(user.premium_credits or 0),
+        "lihim_unlocked": user.lihim_premium_unlocked_at is not None,
+    }
 
 _otp_last_request: dict[str, float] = {}
 _OTP_COOLDOWN_SEC = 30.0
@@ -60,7 +72,6 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
         uid = int(data["sub"])
     except (JWTError, KeyError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid token")
-    from app.models.user import User
 
     user = db.query(User).filter(User.id == uid).first()
     if not user:

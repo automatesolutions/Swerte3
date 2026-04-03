@@ -54,6 +54,9 @@ def require_premium(user: User) -> User:
     if (user.premium_credits or 0) < 1:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="No premium predictions left. Complete payment to add credits (₱2 per prediction).",
+            detail=(
+                "Kailangan ng token para sa Lihim. Maraming LLM agents at analytics ang tumatakbo — "
+                "kailangan ng compute at API cost. Mag-top up (hal. 2 pesos = 1 token)."
+            ),
         )
     return user

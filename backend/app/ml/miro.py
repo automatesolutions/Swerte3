@@ -1,14 +1,13 @@
 """Miro-style two-round LLM merge for Swertres."""
 from __future__ import annotations
 
-import json
 import logging
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from app.config import SWERTRES_DIGIT_MAX, SWERTRES_DIGIT_MIN
 from app.ml import council as council_mod
-from app.services.llm_client import LLMClient
+from app.services.llm_client import LLMClient, safe_json_dumps_for_llm
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +48,16 @@ def _fallback_from_models(models: Dict[str, Any]) -> List[int]:
     return most[:3]
 
 
-def build_miro_context(session_value: str, models: Dict[str, Any]) -> Dict[str, Any]:
+def build_miro_context(
+    session_value: str,
+    models: Dict[str, Any],
+    enrichment: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     preds = {}
     for name, payload in models.items():
         if isinstance(payload, dict) and "digits" in payload:
             preds[name] = payload["digits"]
-    return {
+    ctx: Dict[str, Any] = {
         "session": session_value,
         "game_rules": {
             "name": "Swertres / 3D",
@@ -66,13 +69,24 @@ def build_miro_context(session_value: str, models: Dict[str, Any]) -> Dict[str, 
         "base_predictions": preds,
         "overlap": council_mod.overlap_summary({k: list(v) for k, v in preds.items()}),
     }
+    if enrichment:
+        ctx["multi_agent_inputs"] = enrichment
+    return ctx
 
 
-def run_miro_swertres(session_value: str, models: Dict[str, Any]) -> List[int]:
-    ctx = build_miro_context(session_value, models)
+def run_miro_swertres(
+    session_value: str,
+    models: Dict[str, Any],
+    enrichment: Optional[Dict[str, Any]] = None,
+) -> List[int]:
+    ctx = build_miro_context(session_value, models, enrichment)
     llm = LLMClient()
     agent_system = (
         "You simulate three specialists named XGBoost, MarkovChain, Analyst tied to prior JSON only. "
+        "The user JSON may include multi_agent_inputs: Google Sheet–ingested draw history tail, "
+        "Gaussian and co-occurrence analytics summaries, today's picture-analysis and cognitive-challenge "
+        "hints, and metadata about data sources. Treat these as weak advisory context only; lottery draws "
+        "are random and past results do not determine future outcomes. "
         "Swertres triple: three digits 0-9, repeats allowed. No winning guarantees. "
         "Output JSON {\"agents\": [3 objects]} each {\"model\": string, \"reaction\": string, "
         "\"candidate_triple\": [d1,d2,d3] }."
@@ -80,7 +94,7 @@ def run_miro_swertres(session_value: str, models: Dict[str, Any]) -> List[int]:
     agents_json = llm.chat_json(
         [
             {"role": "system", "content": agent_system},
-            {"role": "user", "content": json.dumps(ctx, default=str)},
+            {"role": "user", "content": safe_json_dumps_for_llm(ctx)},
         ],
         temperature=0.35,
         max_tokens=900,
@@ -90,13 +104,33 @@ def run_miro_swertres(session_value: str, models: Dict[str, Any]) -> List[int]:
         "Chairman: output JSON {\"final_digits\": [d1,d2,d3]} only, digits 0-9, repeats allowed, "
         "advisory lottery pick. JSON only."
     )
+    # Slim payload: full ctx is huge (histograms/curves); agents already saw it. Avoid duplicate + invalid JSON (NaN).
+    ma = ctx.get("multi_agent_inputs") or {}
+    ga = ma.get("analytics_gaussian") if isinstance(ma.get("analytics_gaussian"), dict) else {}
+    chair_user_payload: Dict[str, Any] = {
+        "session": ctx.get("session"),
+        "base_predictions": ctx.get("base_predictions"),
+        "overlap": ctx.get("overlap"),
+        "agents": agents_json.get("agents"),
+        "multi_agent_inputs_summary": {
+            "data_sources": ma.get("data_sources"),
+            "recent_draw_results_tail": ma.get("recent_draw_results_tail"),
+            "analytics_gaussian": {
+                "draws_sampled": ga.get("draws_sampled"),
+                "mean_digit_sum": ga.get("mean_digit_sum"),
+                "std_digit_sum": ga.get("std_digit_sum"),
+                "sum_log_product_correlation": ga.get("sum_log_product_correlation"),
+            },
+            "analytics_cooccurrence_top_pairs": ma.get("analytics_cooccurrence_top_pairs"),
+            "picture_analysis_daily": ma.get("picture_analysis_daily"),
+            "cognitive_challenge_daily": ma.get("cognitive_challenge_daily"),
+            "external_news": ma.get("external_news"),
+        },
+    }
     final_json = llm.chat_json(
         [
             {"role": "system", "content": chair_system},
-            {
-                "role": "user",
-                "content": json.dumps({"analytics": ctx, "agents": agents_json.get("agents")}, default=str),
-            },
+            {"role": "user", "content": safe_json_dumps_for_llm(chair_user_payload)},
         ],
         temperature=0.2,
         max_tokens=400,
@@ -109,7 +143,7 @@ def run_miro_swertres(session_value: str, models: Dict[str, Any]) -> List[int]:
     repair = llm.chat_json(
         [
             {"role": "system", "content": "Output only {\"final_digits\": [d1,d2,d3]} with digits 0-9."},
-            {"role": "user", "content": json.dumps({"bad": final_json})},
+            {"role": "user", "content": safe_json_dumps_for_llm({"bad": final_json})},
         ],
         temperature=0.1,
         max_tokens=200,

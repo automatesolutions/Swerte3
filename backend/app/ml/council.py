@@ -1,11 +1,10 @@
 """LLM swarm / council summaries for premium tier (Swertres)."""
 from __future__ import annotations
 
-import json
 from collections import Counter
 from typing import Any, Dict, List
 
-from app.services.llm_client import LLMClient
+from app.services.llm_client import LLMClient, safe_json_dumps_for_llm
 
 
 def multiset_jaccard(a: List[int], b: List[int]) -> float:
@@ -58,7 +57,7 @@ def run_swarm_summary(session: str, preds_for_miro: Dict[str, Any]) -> Dict[str,
         "Order must match the six names listed."
     )
     agents_json = llm.chat_json(
-        [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(ctx, default=str)}],
+        [{"role": "system", "content": system}, {"role": "user", "content": safe_json_dumps_for_llm(ctx)}],
         temperature=0.35,
         max_tokens=1400,
     )
@@ -70,7 +69,7 @@ def run_swarm_summary(session: str, preds_for_miro: Dict[str, Any]) -> Dict[str,
     final = llm.chat_json(
         [
             {"role": "system", "content": chair},
-            {"role": "user", "content": json.dumps({"context": ctx, "agents": agents_json}, default=str)},
+            {"role": "user", "content": safe_json_dumps_for_llm({"context": ctx, "agents": agents_json})},
         ],
         temperature=0.25,
         max_tokens=500,

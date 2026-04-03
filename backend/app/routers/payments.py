@@ -5,15 +5,31 @@ import json
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
+from app.deps import get_current_user
 from app.models.payment import PaymentEvent
 from app.models.user import User
 from app.services.paymongo import verify_paymongo_signature
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+_PESO_PER_TOKEN = 2
+
+
+class TokenTopupRequest(BaseModel):
+    provider: str = Field(..., pattern="^(gcash|maya|gotyme)$")
+    amount_pesos: int = Field(..., ge=2)
+
+
+class TokenTopupResponse(BaseModel):
+    provider: str
+    amount_pesos: int
+    tokens_added: int
+    premium_credits: int
 
 
 def _grant_premium(db: Session, user_id: int) -> None:
@@ -67,3 +83,32 @@ async def paymongo_webhook(
         _grant_premium(db, user_id)
 
     return {"received": True}
+
+
+@router.post("/topup", response_model=TokenTopupResponse)
+def topup_tokens(
+    body: TokenTopupRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    tokens_to_add = body.amount_pesos // _PESO_PER_TOKEN
+    if tokens_to_add < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Minimum top-up is {_PESO_PER_TOKEN} pesos for 1 token.",
+        )
+
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.premium_credits = int(user.premium_credits or 0) + tokens_to_add
+    db.commit()
+    db.refresh(user)
+
+    return TokenTopupResponse(
+        provider=body.provider,
+        amount_pesos=body.amount_pesos,
+        tokens_added=tokens_to_add,
+        premium_credits=int(user.premium_credits or 0),
+    )

@@ -6,6 +6,7 @@ import logging
 import hashlib
 from datetime import date as date_cls, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -14,8 +15,11 @@ from app.ml.markov_model import predict_next_triple
 from app.ml.miro import run_miro_swertres
 from app.ml.xgboost_model import SwertresXGBoost
 from app.models.draw import DrawSession
+from app.models.daily_math_cognitive import DailyMathCognitive
+from app.models.daily_picture_analysis import DailyPictureAnalysis
 from app.models.prediction import PredictionRecord
 from app.ml import council as council_mod
+from app.services.analytics_dashboard import build_cooccurrence_graph, build_gaussian_bundle
 from app.services.draw_history import load_triples, load_triples_until
 from app.services.sheets_ingest import run_full_ingest
 
@@ -144,6 +148,90 @@ def predict_free_for_date_all_sessions(
     return out
 
 
+def _manila_calendar_date() -> date_cls:
+    return datetime.now(ZoneInfo("Asia/Manila")).date()
+
+
+def _picture_scene_hint_for_theme(theme_key: Optional[str]) -> str:
+    """Match picture_analysis router hints (theme is stored on DailyPictureAnalysis, not scene text)."""
+    hints = {
+        "sari_sari": "Tingnan ang presyo, chalkboard, at display — saan nakasulat ang mga digit?",
+        "komiks_strip": "Basahin ang speech bubble at mga panel — may nakatagong numero.",
+        "perya": "Tiket, booth, at laro — hanapin ang mga numero.",
+        "school_kalye": "Sasakyan, pinto, at jersey — bilangin ang mga digit.",
+        "tindahan_istilo": "Resibo, timbangan, at kalendaryo — saan nakasilip ang numero?",
+    }
+    if not theme_key:
+        return "Hanapin ang lahat ng makikitang digit sa larawan."
+    return hints.get(theme_key, "Hanapin ang lahat ng makikitang digit sa larawan.")
+
+
+def _premium_agent_enrichment(db: Session, user_id: int, session: DrawSession) -> Dict[str, Any]:
+    """Signals for MiroFish multi-agent merge: sheet history, analytics, picture & cognitive hints."""
+    settings = get_settings()
+    cal = _manila_calendar_date()
+    hist = load_triples(db, session, limit=6000)
+    tail = [f"{a}-{b}-{c}" for a, b, c in hist[-28:]]
+
+    gauss = build_gaussian_bundle(db, session, limit=min(4000, max(200, len(hist) or 200)))
+    cooc_g = build_cooccurrence_graph(db, session, limit_draws=min(120_000, max(500, len(hist) * 50)), top_links=10)
+    co_links = list(cooc_g.get("links") or [])[:6]
+
+    pic = (
+        db.query(DailyPictureAnalysis)
+        .filter(DailyPictureAnalysis.user_id == user_id, DailyPictureAnalysis.calendar_date == cal)
+        .first()
+    )
+    picture_block: Optional[Dict[str, Any]] = None
+    if pic:
+        picture_block = {
+            "theme_key": pic.theme_key,
+            "scene_hint": _picture_scene_hint_for_theme(pic.theme_key)[:500],
+        }
+
+    mc = (
+        db.query(DailyMathCognitive)
+        .filter(DailyMathCognitive.user_id == user_id, DailyMathCognitive.calendar_date == cal)
+        .first()
+    )
+    if mc:
+        cognitive_block: Dict[str, Any] = {
+            "tip_tagalog": (mc.tip_tagalog or "")[:420],
+            "booklet_excerpt": (mc.booklet_prompt_en or "")[:420],
+        }
+    else:
+        seed = hashlib.sha256(f"cognitive|{user_id}|{cal.isoformat()}|{session.value}".encode()).digest()
+        cognitive_block = {
+            "deterministic_entropy_digits": [seed[0] % 10, seed[1] % 10, seed[2] % 10],
+            "note": "No cached cognitive puzzle row for today; seeded digits only.",
+        }
+
+    return {
+        "data_sources": {
+            "google_sheet_id": settings.google_sheet_id,
+            "historical_draw_rows_loaded": len(hist),
+            "tabs": [settings.sheet_tab_9am, settings.sheet_tab_4pm, settings.sheet_tab_9pm],
+            "sheet_public_url": (
+                f"https://docs.google.com/spreadsheets/d/{settings.google_sheet_id}/edit"
+            ),
+        },
+        "recent_draw_results_tail": tail,
+        "analytics_gaussian": {
+            "draws_sampled": gauss.get("draws_sampled"),
+            "mean_digit_sum": gauss.get("mean_sum"),
+            "std_digit_sum": gauss.get("std_sum"),
+            "sum_log_product_correlation": gauss.get("correlation"),
+        },
+        "analytics_cooccurrence_top_pairs": co_links,
+        "picture_analysis_daily": picture_block,
+        "cognitive_challenge_daily": cognitive_block,
+        "external_news": {
+            "available": False,
+            "note": "Live news is not wired in this build; rely on history + analytics + user puzzles only.",
+        },
+    }
+
+
 def predict_premium_for_session(
     db: Session,
     user_id: Optional[int],
@@ -151,6 +239,10 @@ def predict_premium_for_session(
 ) -> Dict[str, Any]:
     base = predict_free_for_session(db, session)
     settings = get_settings()
+    enrichment: Dict[str, Any] = {}
+    if user_id is not None:
+        enrichment = _premium_agent_enrichment(db, user_id, session)
+
     preds_for_miro = {
         "XGBoost": {"numbers": base["models"]["XGBoost"]["digits"]},
         "MarkovChain": {"numbers": base["models"]["Markov"]["digits"]},
@@ -160,7 +252,7 @@ def predict_premium_for_session(
     council_report: Dict[str, Any] = {}
     if settings.llm_api_key:
         try:
-            miro_digits = run_miro_swertres(session.value, base["models"])
+            miro_digits = run_miro_swertres(session.value, base["models"], enrichment or None)
         except Exception as e:
             logger.exception("Miro failed")
             miro_err = str(e)
@@ -177,6 +269,7 @@ def predict_premium_for_session(
         "tier": "premium",
         "miro": {"digits": miro_digits} if miro_digits else {"error": miro_err},
         "council": council_report,
+        "agent_enrichment": enrichment,
     }
     rec = PredictionRecord(
         user_id=user_id,

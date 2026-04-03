@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { getStoredAccessToken } from '../auth/storage';
 import { HomeScreen } from '../screens/HomeScreen';
+import { LihimPremiumScreen } from '../screens/LihimPremiumScreen';
 import { PredictScreen } from '../screens/PredictScreen';
 import { AuthScreen } from '../screens/AuthScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
@@ -60,7 +61,17 @@ export function RootNavigator(): React.ReactElement {
       <Stack.Navigator initialRouteName={initialRoute} screenOptions={screenOptions}>
         <Stack.Screen name="Auth" component={AuthScreen} options={{ title: 'Sign in' }} />
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Swerte3' }} />
-        <Stack.Screen name="Predict" component={PredictScreen} options={{ title: 'Predict' }} />
+        <Stack.Screen
+          name="LihimPremium"
+          component={LihimPremiumScreen}
+          options={{
+            title: 'Elite',
+            headerStyle: { backgroundColor: '#1a0f08' },
+            headerTintColor: '#f7e7b0',
+            headerShadowVisible: false,
+          }}
+        />
+        <Stack.Screen name="Predict" component={PredictScreen} options={{ title: 'LuckyPick' }} />
         <Stack.Screen name="Paywall" component={PaywallScreen} options={{ title: 'Premium' }} />
         <Stack.Screen
           name="PictureAnalysis"

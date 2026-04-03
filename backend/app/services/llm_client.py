@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +12,39 @@ from openai import OpenAI
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_for_json(value: Any) -> Any:
+    """Recursively convert values so json.dumps(..., allow_nan=False) always succeeds (OpenAI rejects NaN in request bodies)."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
+    if hasattr(value, "item") and callable(getattr(value, "item", None)):
+        try:
+            return sanitize_for_json(value.item())
+        except Exception:
+            return str(value)
+    if isinstance(value, dict):
+        return {str(k) if not isinstance(k, str) else k: sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_for_json(v) for v in value]
+    return str(value)
+
+
+def safe_json_dumps_for_llm(obj: Any) -> str:
+    """Strict JSON string for chat `content` (no NaN/Infinity; numpy-safe)."""
+    return json.dumps(sanitize_for_json(obj), ensure_ascii=False, allow_nan=False)
 
 
 class LLMClient:
