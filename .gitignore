@@ -1,5 +1,8 @@
-# Python
+# Secrets / local env (never commit)
 backend/.env
+mobile/.env
+.env
+.env.local
 backend/__pycache__/
 backend/**/__pycache__/
 backend/.venv/

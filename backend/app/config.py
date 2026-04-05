@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
+from pathlib import Path
+from typing import Any, List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Always load backend/.env regardless of current working directory (uvicorn may start elsewhere).
+_BACKEND_ENV = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_BACKEND_ENV),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -17,6 +22,9 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://swerte3:swerte3@localhost:5432/swerte3"
     secret_key: str = "dev-secret-change-in-production"
     debug: bool = False
+    # When DEBUG=true or OTP_TEST_MODE=true, use this exact 6-digit code instead of random (testing only).
+    otp_test_code: str = ""
+    otp_test_mode: bool = False
     api_cors_origins: str = "*"
 
     google_sheet_id: str = "12mVATo7sJTVbvlwEMcOYQwBy8t9LOtGeFlhwaxywCJU"
@@ -43,9 +51,28 @@ class Settings(BaseSettings):
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from_number: str = ""
+    # Semaphore — Philippines SMS (https://www.semaphore.co/)
+    semaphore_api_key: str = ""
+    semaphore_sender_name: str = ""
+
+    # paymongo = PayMongo hosted checkout (good for PH testing). paypal = PayPal Orders + capture.
+    payment_provider: str = "paymongo"
+
+    # PayPal (Orders v2). Get Client ID + Secret from developer.paypal.com → Apps & Credentials.
+    paypal_client_id: str = ""
+    paypal_client_secret: str = ""
+    paypal_sandbox: bool = True
+    # HTTPS URLs PayPal redirects to after approve / cancel (must match app URL in production).
+    paypal_return_url: str = "https://example.com/paypal-return"
+    paypal_cancel_url: str = "https://example.com/paypal-cancel"
+    paypal_currency: str = "PHP"
 
     paymongo_secret_key: str = ""
+    paymongo_public_key: str = ""
     paymongo_webhook_secret: str = ""
+    paymongo_checkout_success_url: str = ""
+    paymongo_checkout_cancel_url: str = ""
+    paymongo_skip_capabilities: bool = True
 
     ga4_measurement_id: str = ""
 
@@ -53,6 +80,25 @@ class Settings(BaseSettings):
     admin_api_key: str = ""
 
     premium_credits_per_payment: int = 1
+
+    @field_validator("payment_provider", mode="before")
+    @classmethod
+    def _normalize_payment_provider(cls, v: Any) -> str:
+        if v is None or str(v).strip() == "":
+            return "paymongo"
+        s = str(v).strip().lower()
+        return s if s in ("paymongo", "paypal") else "paymongo"
+
+    @field_validator("paypal_client_id", "paypal_client_secret", mode="before")
+    @classmethod
+    def _normalize_paypal_secrets(cls, v: Any) -> str:
+        """Strip whitespace and optional surrounding quotes from .env (common copy-paste mistake)."""
+        if v is None:
+            return ""
+        s = str(v).strip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
+            s = s[1:-1].strip()
+        return s
 
     @property
     def cors_origins_list(self) -> List[str]:

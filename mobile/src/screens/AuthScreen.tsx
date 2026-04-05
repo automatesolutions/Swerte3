@@ -23,7 +23,7 @@ export function AuthScreen({ navigation }: Props): React.ReactElement {
     setBusy(true);
     try {
       await requestOtp(normalizedPhone);
-      Alert.alert('OTP sent', 'Check server logs if using console SMS provider.');
+      Alert.alert('OTP sent', 'Check your SMS for the code. (Dev: server logs if SMS_PROVIDER=console.)');
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed');
     } finally {

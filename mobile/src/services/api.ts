@@ -197,6 +197,53 @@ export function purchaseTokens(token: string, provider: WalletProvider, amountPe
   );
 }
 
+export type CheckoutSessionResult = {
+  checkout_url: string;
+  checkout_session_id: string;
+  amount_pesos: number;
+};
+
+export type PaymentConfig = {
+  checkout_provider: 'paymongo' | 'paypal';
+  paymongo_auth_return_url?: string | null;
+};
+
+export function fetchPaymentConfig(): Promise<PaymentConfig> {
+  return getJson<PaymentConfig>('/api/payments/config');
+}
+
+/** PayMongo hosted checkout — credits via webhook; use expo-web-browser + return URLs in the app. */
+export function createPaymongoCheckout(
+  token: string,
+  provider: WalletProvider,
+  amountPesos: number,
+  opts?: { returnSuccessUrl?: string; returnCancelUrl?: string },
+): Promise<CheckoutSessionResult> {
+  const body: Record<string, string | number> = { provider, amount_pesos: amountPesos };
+  if (opts?.returnSuccessUrl) body.return_success_url = opts.returnSuccessUrl;
+  if (opts?.returnCancelUrl) body.return_cancel_url = opts.returnCancelUrl;
+  return postJson<CheckoutSessionResult>('/api/payments/checkout', body, { token });
+}
+
+/** PayPal Orders — open `checkout_url`, then `capturePaypalOrder` after approve. */
+export function createPaypalCheckout(token: string, amountPesos: number): Promise<CheckoutSessionResult> {
+  return postJson<CheckoutSessionResult>('/api/payments/checkout', { amount_pesos: amountPesos }, { token });
+}
+
+export type PaypalCaptureResult = {
+  premium_credits: number;
+  tokens_added: number;
+  amount_pesos: number;
+};
+
+export function capturePaypalOrder(token: string, orderId: string): Promise<PaypalCaptureResult> {
+  return postJson<PaypalCaptureResult>(
+    '/api/payments/paypal/capture',
+    { order_id: orderId },
+    { token },
+  );
+}
+
 export type AnalyticsBivariatePoint = { sum: number; log_product: number; session?: string };
 
 /** 1D normalization: histograms + scaled normal PDF for digit sum and log(product). */

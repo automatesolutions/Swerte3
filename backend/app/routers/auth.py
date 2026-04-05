@@ -1,9 +1,12 @@
+import logging
+import re
 from time import time
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
@@ -11,11 +14,15 @@ from app.schemas.auth import OTPRequest, OTPVerify, RefreshRequest, TokenRespons
 from app.services.jwt_service import create_access_token, create_refresh_token, decode_token
 from app.services.otp_service import (
     INVALID_PHONE_HINT,
+    OtpDeliveryError,
     get_or_create_user,
     issue_otp,
+    normalize_otp_code,
     normalize_phone,
     verify_otp,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -46,7 +53,13 @@ def request_otp(body: OTPRequest, db: Session = Depends(get_db)):
             detail="Please wait before requesting another code",
         )
     _otp_last_request[phone] = now
-    issue_otp(db, phone)
+    try:
+        issue_otp(db, phone)
+    except OtpDeliveryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=exc.message,
+        ) from exc
     return {"sent": True}
 
 
@@ -55,6 +68,21 @@ def verify(body: OTPVerify, db: Session = Depends(get_db)):
     phone = normalize_phone(body.phone)
     if not phone:
         raise HTTPException(status_code=400, detail=f"Invalid phone number. {INVALID_PHONE_HINT}")
+    settings = get_settings()
+    submitted = normalize_otp_code(body.code)
+    fixed_raw = (settings.otp_test_code or "").strip().strip('"').strip("'")
+    if (
+        (settings.debug or settings.otp_test_mode)
+        and fixed_raw
+        and re.fullmatch(r"\d{6}", fixed_raw)
+        and submitted == fixed_raw
+    ):
+        if settings.debug:
+            logger.info("OTP dev bypass: signed in %s with OTP_TEST_CODE (no prior /otp/request needed).", phone)
+        user = get_or_create_user(db, phone)
+        access = create_access_token(str(user.id), {"phone": phone})
+        refresh = create_refresh_token(str(user.id))
+        return TokenResponse(access_token=access, refresh_token=refresh)
     if not verify_otp(db, phone, body.code.strip()):
         raise HTTPException(status_code=401, detail="Invalid or expired code")
     user = get_or_create_user(db, phone)

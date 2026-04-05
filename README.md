@@ -46,5 +46,5 @@ cd mobile && npm test
 
 ## Deploy (sketch)
 
-- **Backend:** [backend/Dockerfile](backend/Dockerfile) and [backend/cloudbuild.yaml](backend/cloudbuild.yaml) for Cloud Run; set env vars ( `DATABASE_URL`, `SECRET_KEY`, `LLM_API_KEY`, `ADMIN_API_KEY`, PayMongo secrets).
+- **Backend:** [backend/Dockerfile](backend/Dockerfile) and [backend/cloudbuild.yaml](backend/cloudbuild.yaml) for Cloud Run; set env vars (`DATABASE_URL`, `SECRET_KEY`, `LLM_API_KEY`, `ADMIN_API_KEY`, PayPal `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`, return URLs).
 - **Mobile:** use EAS Build or Fastlane under [mobile/fastlane](mobile/fastlane) after app signing is configured.

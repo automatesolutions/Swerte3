@@ -15,8 +15,8 @@ export function PaywallScreen({ navigation }: Props): React.ReactElement {
         <Card.Content>
           <Title>₱2 unlock</Title>
           <Paragraph>
-            Complete PayMongo checkout on the web or wire the native SDK. After payment, the webhook adds premium prediction
-            credits on your user (metadata user_id)—one credit per successful payment (₱2 each).
+            Add tokens with PayPal from Home (Add Tokens): you approve payment in the browser, then tap “Complete PayPal
+            payment” so the server captures the order and adds premium credits (₱2 per token slot, same as the API).
           </Paragraph>
           <Button
             mode="contained"

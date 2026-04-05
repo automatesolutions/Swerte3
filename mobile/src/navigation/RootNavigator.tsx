@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
+import * as ExpoLinking from 'expo-linking';
+import type { LinkingOptions } from '@react-navigation/native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { getStoredAccessToken } from '../auth/storage';
@@ -15,6 +17,15 @@ import { AnalyticsScreen } from '../screens/AnalyticsScreen';
 import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+const linking: LinkingOptions<RootStackParamList> = {
+  prefixes: [ExpoLinking.createURL('/'), 'swerte3://'],
+  config: {
+    screens: {
+      Home: 'checkout-done',
+    },
+  },
+};
 
 const screenOptions = {
   headerStyle: { backgroundColor: '#1e4a31' },
@@ -57,7 +68,7 @@ export function RootNavigator(): React.ReactElement {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       <Stack.Navigator initialRouteName={initialRoute} screenOptions={screenOptions}>
         <Stack.Screen name="Auth" component={AuthScreen} options={{ title: 'Sign in' }} />
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Swerte3' }} />

@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Swerte3 — Distributing the app (EAS / APK)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #f4f7f4;
+      --paper: #fefffc;
+      --ink: #1a2e22;
+      --muted: #4a6356;
+      --accent: #1e5c3d;
+      --accent-soft: #d4ebe0;
+      --border: #c5d4ca;
+      --warn-bg: #fff8e6;
+      --warn-border: #e6c96a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "DM Sans", system-ui, sans-serif;
+      font-size: 1.05rem;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    .wrap {
+      max-width: 46rem;
+      margin: 0 auto;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+    header {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem 1.5rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 2px 12px rgba(30, 92, 61, 0.06);
+    }
+    h1 {
+      font-family: "Fraunces", Georgia, serif;
+      font-size: 1.85rem;
+      font-weight: 700;
+      margin: 0 0 0.5rem;
+      color: var(--accent);
+      letter-spacing: -0.02em;
+    }
+    .lede {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.98rem;
+    }
+    .md-note {
+      font-size: 0.88rem;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px dashed var(--border);
+    }
+    .md-note a { color: var(--accent); }
+    nav.toc {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 2rem;
+    }
+    nav.toc h2 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin: 0 0 0.75rem;
+    }
+    nav.toc ol {
+      margin: 0;
+      padding-left: 1.2rem;
+      columns: 1;
+    }
+    nav.toc a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.92rem;
+    }
+    nav.toc a:hover { text-decoration: underline; }
+    section {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.35rem 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    section h2 {
+      font-family: "Fraunces", Georgia, serif;
+      font-size: 1.25rem;
+      margin: 0 0 1rem;
+      color: var(--accent);
+      scroll-margin-top: 1rem;
+    }
+    section h2 .num { color: var(--muted); font-weight: 600; margin-right: 0.35rem; }
+    p { margin: 0 0 1rem; }
+    p:last-child { margin-bottom: 0; }
+    ul { margin: 0 0 1rem; padding-left: 1.25rem; }
+    li { margin-bottom: 0.35rem; }
+    strong { font-weight: 600; }
+    code, .path {
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 0.9em;
+      background: var(--accent-soft);
+      padding: 0.12em 0.35em;
+      border-radius: 4px;
+    }
+    pre {
+      margin: 0.75rem 0 1rem;
+      padding: 1rem 1.1rem;
+      background: #1a2e22;
+      color: #e8f5ef;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      margin: 0.75rem 0 1rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.55rem 0.65rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--accent-soft);
+      font-weight: 600;
+    }
+    .callout {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      border-radius: 8px;
+      padding: 1rem 1.1rem;
+      margin: 1rem 0;
+      font-size: 0.95rem;
+    }
+    .recap {
+      background: linear-gradient(135deg, #e8f4ec 0%, var(--accent-soft) 100%);
+      border-color: var(--accent);
+    }
+    a { color: var(--accent); }
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 1.25rem 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Distributing Swerte3 (Expo / EAS Build)</h1>
+      <p class="lede">
+        Installable Android builds for testers, how they differ from Expo Go, and how API URLs and secrets work.
+        Layout: <span class="path">mobile/</span> = Expo app, <span class="path">backend/</span> = FastAPI API.
+      </p>
+      <p class="md-note">Plain Markdown twin: <a href="./DISTRIBUTION.md">DISTRIBUTION.md</a></p>
+    </header>
+
+    <nav class="toc" aria-label="Table of contents">
+      <h2>On this page</h2>
+      <ol>
+        <li><a href="#s0">Backend + APK (read first)</a></li>
+        <li><a href="#s1">What you are building</a></li>
+        <li><a href="#s2">How the app reaches your API</a></li>
+        <li><a href="#s3">What “your server” means</a></li>
+        <li><a href="#s4">Prerequisites</a></li>
+        <li><a href="#s5">Install EAS CLI and log in</a></li>
+        <li><a href="#s6">Link the project</a></li>
+        <li><a href="#s7">Configure EAS Build</a></li>
+        <li><a href="#s8">Set API URL for the build</a></li>
+        <li><a href="#s9">Build Android APK</a></li>
+        <li><a href="#s10">Share with testers (link, QR, APK)</a></li>
+        <li><a href="#s11">Tester checklist</a></li>
+        <li><a href="#s12">Common failures</a></li>
+        <li><a href="#s13">Production / Play Store</a></li>
+        <li><a href="#s14">iPhone / TestFlight (detailed)</a></li>
+        <li><a href="#s15">One-line recap</a></li>
+      </ol>
+    </nav>
+
+    <section id="s0">
+      <h2><span class="num">0.</span> The app does not run without the backend (read this first)</h2>
+      <p>Building an APK is only <strong>half</strong> of what makes Swerte3 work for testers.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Piece</th>
+            <th>What it is</th>
+            <th>What <strong>you</strong> must do</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Mobile (APK)</strong></td>
+            <td>The screen in your friend’s hand</td>
+            <td>Build with EAS; set <code>EXPO_PUBLIC_API_URL</code> on Expo so the APK knows <strong>where</strong> to send requests.</td>
+          </tr>
+          <tr>
+            <td><strong>Backend (API)</strong></td>
+            <td>Login, database, PayMongo, everything “smart”</td>
+            <td><strong>Run it</strong> (e.g. <code>uvicorn</code> on your PC) <strong>and</strong> expose it on the internet (e.g. <strong>ngrok</strong>) <strong>or</strong> deploy it (e.g. Google Cloud). Load <span class="path">backend/.env</span> (or cloud secrets) <strong>on that server</strong> — same as when <em>you</em> test.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>Expo environment variables do not start your API.</strong> They only tell the mobile app which <strong>public URL</strong> to call. If the backend is off, or ngrok is off, or the URL is wrong, the APK will open but sign-in / payments / data will fail — nothing is answering at that address.
+      </div>
+      <p><strong>For friend testing you always do both:</strong> (1) <strong>Backend running</strong> + reachable at the URL in <code>EXPO_PUBLIC_API_URL</code>, with <span class="path">backend/.env</span> configured there, and (2) <strong>APK built</strong> with that same URL baked in (Expo <strong>preview</strong> env + <code>eas build --profile preview</code>).</p>
+    </section>
+
+    <section id="s1">
+      <h2><span class="num">1.</span> What you are building</h2>
+      <table>
+        <thead>
+          <tr><th>Artifact</th><th>Typical use</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>APK</strong> (<code>preview</code> profile)</td>
+            <td>Email/Drive/Telegram to friends; install with “unknown sources”.</td>
+          </tr>
+          <tr>
+            <td><strong>AAB</strong> (<code>production</code> profile)</td>
+            <td>Upload to <strong>Google Play</strong> (not for direct side-load).</td>
+          </tr>
+          <tr>
+            <td><strong>Expo Go</strong></td>
+            <td>Fast dev on your phone; not what you send to friends for a stable test.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>The <strong>APK does not include your backend</strong> and does <strong>not</strong> include <span class="path">backend/.env</span>. It only ships the React Native bundle and native shell. Your API runs <strong>separately</strong> (your PC + ngrok, or Google Cloud, etc.).</p>
+    </section>
+
+    <section id="s2">
+      <h2><span class="num">2.</span> How the app reaches your API (important)</h2>
+      <ul>
+        <li>The mobile app reads <code>EXPO_PUBLIC_API_URL</code> (see <span class="path">mobile/.env.example</span>). That value is <strong>inlined at build time</strong> when EAS runs Metro.</li>
+        <li>After install, the app <strong>always</strong> calls whatever URL was baked into <strong>that</strong> build. It does <strong>not</strong> read your laptop’s <span class="path">mobile/.env</span> on each launch.</li>
+        <li><strong>PayMongo / PayPal / DB / JWT secrets</strong> belong in <span class="path">backend/.env</span> (or cloud secrets on the server). They are <strong>server-side only</strong> and are <strong>not</strong> inside the APK.</li>
+      </ul>
+      <p><strong>Implication for friends:</strong> Their phones must reach <code>EXPO_PUBLIC_API_URL</code> on the internet. <code>http://127.0.0.1:8000</code>, <code>http://10.0.2.2:8000</code>, or a random LAN IP usually <strong>will not work</strong> for someone outside your Wi‑Fi.</p>
+      <p><strong>Ngrok:</strong> If the APK was built with <code>https://OLD.ngrok-free.dev</code> and you restart ngrok, the old APK <strong>still</strong> calls OLD until you <strong>rebuild</strong> (unless you use a stable ngrok domain or a fixed deployed API URL).</p>
+    </section>
+
+    <section id="s3">
+      <h2><span class="num">3.</span> What “your server” means</h2>
+      <p><strong>Your server</strong> = whatever process answers HTTP at the base URL you put in <code>EXPO_PUBLIC_API_URL</code>.</p>
+      <p>Examples:</p>
+      <ul>
+        <li><strong>Local + ngrok:</strong> FastAPI on your PC, <code>uvicorn</code> on port 8000, ngrok forwarding public URL → that port. Secrets in <span class="path">backend/.env</span> on that machine.</li>
+        <li><strong>Google Cloud Run:</strong> FastAPI container in GCP. Secrets in Cloud Run env vars or Secret Manager.</li>
+      </ul>
+      <p>The friend’s APK only does: <strong>HTTPS request → that URL</strong>. It never loads your <span class="path">backend/.env</span> file.</p>
+    </section>
+
+    <section id="s4">
+      <h2><span class="num">4.</span> Prerequisites</h2>
+      <ul>
+        <li><a href="https://expo.dev">Expo account</a> (free tier can run builds; limits apply).</li>
+        <li><strong>Node.js</strong> and npm on your PC.</li>
+        <li>For <strong>Android APK</strong>, you do <strong>not</strong> need Xcode or a Mac.</li>
+        <li>Run commands from inside <span class="path">mobile/</span> where noted below.</li>
+      </ul>
+    </section>
+
+    <section id="s5">
+      <h2><span class="num">5.</span> Install EAS CLI and log in</h2>
+      <pre><code>npm install -g eas-cli
+eas login</code></pre>
+      <p><strong>Directory:</strong> These two commands do <strong>not</strong> need to be run from <span class="path">mobile/</span> — <code>-g</code> installs globally and <code>eas login</code> is account-wide. Use the same Expo account you link to this project.</p>
+    </section>
+
+    <section id="s6">
+      <h2><span class="num">6.</span> Link the project (once per app)</h2>
+      <p>From <span class="path">mobile/</span> (where <span class="path">app.json</span> lives):</p>
+      <pre><code>cd path/to/Swerte3/mobile
+eas init</code></pre>
+      <p>Follow prompts to create or select the Expo project on expo.dev.</p>
+    </section>
+
+    <section id="s7">
+      <h2><span class="num">7.</span> Configure EAS Build (once)</h2>
+      <pre><code>eas build:configure</code></pre>
+      <p>This repo includes <span class="path">eas.json</span> with:</p>
+      <ul>
+        <li><code>preview</code> — Android <code>buildType: "apk"</code> (shareable file).</li>
+        <li><code>production</code> — Android <code>app-bundle</code> (Play Store).</li>
+        <li><code>development</code> — dev client (optional).</li>
+      </ul>
+    </section>
+
+    <section id="s8">
+      <h2><span class="num">8.</span> Set the API URL for the build (critical)</h2>
+      <p>EAS builds run <strong>in the cloud</strong>. They do <strong>not</strong> automatically see your local <span class="path">mobile/.env</span> (often gitignored) unless you wire env in.</p>
+      <p><strong>Options:</strong></p>
+      <ol>
+        <li>
+          <strong>EAS environment variables (recommended)</strong><br />
+          expo.dev → Project → <strong>Environment variables</strong> → add <code>EXPO_PUBLIC_API_URL</code> = your public API base. <strong>No trailing slash.</strong><br />
+          Set <strong>Environments</strong> to <strong>preview</strong> for <code>eas build --profile preview</code>. Variables scoped <strong>only</strong> to <strong>development</strong> are <strong>not</strong> applied to preview builds — include <strong>preview</strong>.
+        </li>
+        <li>
+          <strong><span class="path">eas.json</span> <code>env</code> on the profile</strong> (commits URL to git if you put the real URL there):
+          <pre><code>"preview": {
+  "env": {
+    "EXPO_PUBLIC_API_URL": "https://your-public-api.example.com"
+  },
+  ...
+}</code></pre>
+        </li>
+        <li>
+          <strong>Secrets</strong> — See <a href="https://docs.expo.dev/eas/environment-variables/">Expo EAS Environment variables</a>.
+        </li>
+      </ol>
+      <p><strong>Rule:</strong> Whatever you set for <code>EXPO_PUBLIC_API_URL</code> at build time is what every installed APK uses until you ship a <strong>new</strong> build.</p>
+    </section>
+
+    <section id="s9">
+      <h2><span class="num">9.</span> Build an Android APK (friend testing)</h2>
+      <p>From <span class="path">mobile/</span>:</p>
+      <pre><code>eas build --platform android --profile preview</code></pre>
+      <ul>
+        <li>First Android build: let <strong>EAS manage credentials</strong> unless you already have a keystore.</li>
+        <li>When the build finishes, the CLI prints a <strong>link</strong> and may show a <strong>QR code</strong> in the terminal.</li>
+        <li>On the web: <a href="https://expo.dev">expo.dev</a> → your project → <strong>Builds</strong> → open the finished build (URL shape: <code>expo.dev/accounts/…/projects/…/builds/&lt;id&gt;</code>).</li>
+      </ul>
+    </section>
+
+    <section id="s10">
+      <h2><span class="num">10.</span> Share with testers (link, QR, or APK file)</h2>
+
+      <h3 style="font-size:1.05rem;margin:1rem 0 0.5rem;color:var(--accent);">Option A — Send the link (and QR from the dashboard)</h3>
+      <ul>
+        <li><strong>Just the URL:</strong> Copy the <strong>build page</strong> URL from the browser (or from the CLI) and send it. Friends open it on <strong>Android</strong> (Chrome) and use <strong>Install</strong>.</li>
+        <li><strong>QR on expo.dev:</strong> On that page, find <strong>Build artifact</strong> (with the <strong>APK</strong> label). The QR is <strong>not</strong> on the main screen — click the white <strong>Install</strong> button. Expo then shows a step (modal / panel) with the <strong>QR code</strong> to scan from an Android phone.</li>
+        <li><strong>Terminal:</strong> After <code>eas build</code> completes, a QR may already appear in the terminal for scanning.</li>
+        <li>Some <strong>internal / preview</strong> flows may ask testers to <strong>sign in</strong> with a free Expo account. To skip that, use Option B.</li>
+      </ul>
+
+      <h3 style="font-size:1.05rem;margin:1.25rem 0 0.5rem;color:var(--accent);">Option B — Download the <code>.apk</code> and share the file</h3>
+      <ol>
+        <li>On <strong>expo.dev</strong>, open the same finished build.</li>
+        <li>In <strong>Build artifact</strong>, open the <strong>⋮</strong> (three-dot) menu next to <strong>Install</strong> / <strong>Open with Orbit</strong> and choose <strong>Download</strong> (wording may vary), or use <strong>Artifacts</strong> if shown.</li>
+        <li>Save the <code>.apk</code>, then share via Drive, Telegram, email (within size limits), etc.</li>
+        <li>Friends download on the phone, open the file, and install (§11).</li>
+      </ol>
+
+      <p><strong>They must trust you</strong> — these installs are not from the Play Store.</p>
+    </section>
+
+    <section id="s11">
+      <h2><span class="num">11.</span> Tester checklist (Android)</h2>
+      <ol>
+        <li><strong>Settings → Apps → Special access</strong> (or Security) → allow <strong>Install unknown apps</strong> for Chrome / Files / Drive.</li>
+        <li>Open the downloaded <code>.apk</code> → <strong>Install</strong>.</li>
+        <li>If Play Protect warns, confirm only if they trust the source.</li>
+      </ol>
+    </section>
+
+    <section id="s12">
+      <h2><span class="num">12.</span> Common failures</h2>
+      <table>
+        <thead>
+          <tr><th>Symptom</th><th>Likely cause</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Login / network errors for friends</td>
+            <td><code>EXPO_PUBLIC_API_URL</code> not public, wrong, or PC/ngrok off.</td>
+          </tr>
+          <tr>
+            <td>Worked yesterday, broken today (ngrok)</td>
+            <td>Ngrok URL changed; <strong>rebuild APK</strong> or use stable/deployed URL.</td>
+          </tr>
+          <tr>
+            <td>Build OK but wrong API</td>
+            <td>Env not set for EAS preview; fix env and <strong>rebuild</strong>.</td>
+          </tr>
+          <tr>
+            <td>“App not installed”</td>
+            <td>Corrupt download or ABI mismatch — re-download or rebuild.</td>
+          </tr>
+          <tr>
+            <td><code>eas build</code> upload fails — <code>git clone … code: 128</code> (Windows)</td>
+            <td>Often <strong>dubious ownership</strong> on <code>.git</code>. Run once (adjust path): <code>git config --global --add safe.directory &quot;C:/Users/jonel/OneDrive/Desktop/Jonel_Projects/Swerte3/.git&quot;</code> then <code>eas build</code> again.</td>
+          </tr>
+          <tr>
+            <td><code>EPERM: scandir '…\.pytest_cache'</code></td>
+            <td>Root <strong><code>.easignore</code></strong> skips <code>backend/</code> on EAS upload. Commit it before <code>eas build</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="s13">
+      <h2><span class="num">13.</span> Production / Play Store (later)</h2>
+      <pre><code>eas build --platform android --profile production</code></pre>
+      <p>You get an <strong>AAB</strong>. Upload to Google Play Console. Keep EAS-managed signing for updates.</p>
+    </section>
+
+    <section id="s14">
+      <h2><span class="num">14.</span> iPhone / iOS — sharing with friends (detailed)</h2>
+      <p>iOS is <strong>stricter</strong> than Android: there is <strong>no</strong> casual “send a file like an APK” for a <strong>standalone</strong> app. For that, testers use Apple’s system — almost always <strong>TestFlight</strong> — which needs the paid Apple program (§14.2).</p>
+
+      <h3>14.0 I only want to test on my iPhone — pay $99?</h3>
+      <p><strong>No</strong> if you use <strong>Expo Go</strong>:</p>
+      <ol>
+        <li>Install <a href="https://apps.apple.com/app/expo-go/id982107779">Expo Go</a> on the iPhone (free).</li>
+        <li>From <span class="path">mobile/</span>, run <code>npx expo start</code>.</li>
+        <li>Same Wi‑Fi or <strong>tunnel</strong>, then <strong>scan the QR</strong> from the terminal / dev tools.</li>
+      </ol>
+      <p>No Apple Developer Program fee for that. The app runs <strong>inside Expo Go</strong>, not your final standalone build — custom native modules may force a dev build or the paid path.</p>
+      <p><strong>~$99/year</strong> applies when you want a real <strong>EAS iOS build</strong> → <strong>TestFlight</strong> / App Store.</p>
+
+      <h3>14.1 What you need for TestFlight / standalone iOS builds (once)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Requirement</th>
+            <th>Why</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://developer.apple.com/programs/">Apple Developer Program</a> (~$99/year)</td>
+            <td>For <strong>TestFlight</strong>, App Store, typical EAS iOS standalone builds — <strong>not</strong> for Expo Go-only testing (§14.0).</td>
+          </tr>
+          <tr>
+            <td>Apple ID enrolled in that program</td>
+            <td>Signing and App Store Connect.</td>
+          </tr>
+          <tr>
+            <td><code>EXPO_PUBLIC_API_URL</code> on EAS</td>
+            <td>Same as Android (§8) — set for <strong>preview</strong> or <strong>production</strong> for the iOS build.</td>
+          </tr>
+          <tr>
+            <td><code>ios.bundleIdentifier</code> in <span class="path">app.json</span></td>
+            <td>Unique app ID (e.g. <code>com.jonel0322.swerte3</code>). Keep it stable for the App Store.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>You <strong>do not</strong> need your own Mac for compiling if you use <strong>EAS Build</strong> (cloud).</p>
+
+      <h3>14.2 Typical path: EAS → App Store Connect → TestFlight</h3>
+      <ol>
+        <li><strong>Register the bundle ID</strong> if needed: <a href="https://developer.apple.com/account/resources/identifiers/list">Apple Developer → Identifiers</a> — App ID matching <code>app.json</code> → <code>ios.bundleIdentifier</code>.</li>
+        <li><strong>App Store Connect</strong>: <a href="https://appstoreconnect.apple.com">appstoreconnect.apple.com</a> → Apps → + → New App (iOS, same bundle ID). Minimal metadata is enough to use TestFlight.</li>
+        <li><strong>First iOS build</strong> from <span class="path">mobile/</span>:
+          <pre><code>eas build --platform ios --profile preview</code></pre>
+          Follow EAS prompts (Apple ID, App Store Connect API key, or app-specific password) — see <a href="https://docs.expo.dev/app-signing/app-credentials/">Expo app credentials</a>.
+        </li>
+        <li><strong>Wait for the build</strong> on <a href="https://expo.dev">expo.dev</a> → your project → Builds. iOS produces an <strong>IPA</strong>; you usually do not email this to friends.</li>
+        <li><strong>Submit to TestFlight</strong> if not automatic:
+          <pre><code>eas submit --platform ios --profile production</code></pre>
+          Or upload via Transporter / Expo — <a href="https://docs.expo.dev/submit/ios/">EAS Submit (iOS)</a>. Build must appear under your app → TestFlight in App Store Connect.
+        </li>
+        <li><strong>Add testers</strong> in App Store Connect → TestFlight: <strong>Internal</strong> (up to 100, users in Users and Access) vs <strong>External</strong> (email list; first external group often needs Beta App Review).</li>
+        <li><strong>Friends:</strong> Install <strong>TestFlight</strong> from the App Store → open Apple’s invite email or a public link → Accept → Install Swerte3.</li>
+      </ol>
+
+      <h3>14.3 Android vs iPhone</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Android (§10)</th>
+            <th>iPhone</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Link or <code>.apk</code></td>
+            <td>TestFlight invite or public link — not a casual <code>.ipa</code> mail</td>
+          </tr>
+          <tr>
+            <td>Often no Apple account</td>
+            <td>Free <strong>Apple ID</strong> needed for TestFlight</td>
+          </tr>
+          <tr>
+            <td>“Install unknown apps”</td>
+            <td>Only TestFlight / App Store</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>14.4 Backend</h3>
+      <p>Same as Android: your API (ngrok or deployed URL) must be up at <code>EXPO_PUBLIC_API_URL</code>.</p>
+
+      <h3>14.5 Other options</h3>
+      <p><strong>Ad hoc / UDIDs</strong> — possible for small lists, heavy setup. <strong>Expo Go</strong> — fine for you in dev, not a stand-in for TestFlight with external testers.</p>
+      <p>Docs: <a href="https://docs.expo.dev/build/setup/">Expo iOS build</a>, <a href="https://developer.apple.com/testflight/">TestFlight</a>.</p>
+    </section>
+
+    <section id="s15" class="recap">
+      <h2><span class="num">15.</span> One-line recap</h2>
+      <p><strong>Android:</strong> Set <code>EXPO_PUBLIC_API_URL</code> for <strong>preview</strong> → <code>eas build --platform android --profile preview</code> → share link / QR / <code>.apk</code> (§10) → keep API running.</p>
+      <p><strong>iPhone:</strong> Apple Developer Program → <code>eas build --platform ios --profile preview</code> (and submit to TestFlight) → friends use <strong>TestFlight</strong> (§14) → same API URL env as Android.</p>
+      <p>For payments/webhooks, see <span class="path">backend/.env.example</span> and PayMongo (webhook URL must match your <strong>public</strong> API host).</p>
+    </section>
+  </div>
+</body>
+</html>

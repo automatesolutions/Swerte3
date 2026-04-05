@@ -1,14 +1,51 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text as RNText, TextInput, View } from 'react-native';
+import {
+  Alert,
+  AppState,
+  Image,
+  Linking,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text as RNText,
+  TextInput,
+  View,
+} from 'react-native';
+import * as ExpoLinking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 import { Button, Card, Text, Title } from 'react-native-paper';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { clearAuthTokens, getStoredAccessToken } from '../auth/storage';
 import { logScreenView } from '../analytics';
-import { fetchUserMe, purchaseTokens, startPremiumBatch } from '../services/api';
+import {
+  capturePaypalOrder,
+  createPaymongoCheckout,
+  createPaypalCheckout,
+  fetchPaymentConfig,
+  fetchUserMe,
+  purchaseTokens,
+  startPremiumBatch,
+  type CheckoutSessionResult,
+} from '../services/api';
 import type { RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
+
+/** Minimum top-up amount (matches backend / PayPal order). */
+const CHECKOUT_MIN_PESOS = 20;
+/** Same rate as backend: premium credits scale with whole pesos at this ratio. */
+const PESOS_PER_TOKEN = 2;
+const MIN_CHECKOUT_TOKEN_EQUIVALENT = CHECKOUT_MIN_PESOS / PESOS_PER_TOKEN;
+
+type TopupProvider = 'gcash' | 'maya' | 'gotyme';
+const TOPUP_PROVIDER_LABEL: Record<TopupProvider, string> = {
+  gcash: 'GCash',
+  maya: 'Maya',
+  gotyme: 'Card',
+};
 
 const logoSource = require('../../assets/Logo.png');
 
@@ -17,9 +54,12 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
   const [noTokenModalVisible, setNoTokenModalVisible] = useState(false);
   const [gintoBusy, setGintoBusy] = useState(false);
   const [topupVisible, setTopupVisible] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<'gcash' | 'maya' | 'gotyme'>('gcash');
-  const [amountPesos, setAmountPesos] = useState('2');
+  const [amountPesos, setAmountPesos] = useState(String(CHECKOUT_MIN_PESOS));
   const [isBuying, setIsBuying] = useState(false);
+  const [checkoutProvider, setCheckoutProvider] = useState<'paymongo' | 'paypal' | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<TopupProvider>('gcash');
+  const [pendingPaypalOrderId, setPendingPaypalOrderId] = useState<string | null>(null);
+  const [paypalCompleteBusy, setPaypalCompleteBusy] = useState(false);
 
   useEffect(() => {
     void logScreenView('Home');
@@ -39,15 +79,58 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
     }
   }, []);
 
+  const refreshCheckoutProvider = useCallback(async () => {
+    try {
+      const c = await fetchPaymentConfig();
+      setCheckoutProvider(c.checkout_provider);
+    } catch {
+      setCheckoutProvider('paymongo');
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       void loadPremiumCredits();
-    }, [loadPremiumCredits]),
+      void refreshCheckoutProvider();
+    }, [loadPremiumCredits, refreshCheckoutProvider]),
   );
 
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void loadPremiumCredits();
+    });
+    return () => sub.remove();
+  }, [loadPremiumCredits]);
+
   const handleLogout = async () => {
+    setPendingPaypalOrderId(null);
     await clearAuthTokens();
     navigation.reset({ index: 0, routes: [{ name: 'Auth' }] });
+  };
+
+  const handleCompletePaypal = async () => {
+    if (!pendingPaypalOrderId?.trim() || paypalCompleteBusy) return;
+    const token = await getStoredAccessToken();
+    if (!token?.trim()) {
+      Alert.alert('Session expired', 'Please log in again.');
+      return;
+    }
+    setPaypalCompleteBusy(true);
+    try {
+      const r = await capturePaypalOrder(token, pendingPaypalOrderId.trim());
+      setPremiumCredits(r.premium_credits);
+      setPendingPaypalOrderId(null);
+      Alert.alert(
+        'Top-up complete',
+        r.tokens_added > 0
+          ? `Added ${r.tokens_added} token credit(s). Balance: ${r.premium_credits}.`
+          : `Payment was already applied. Balance: ${r.premium_credits}.`,
+      );
+    } catch (err) {
+      Alert.alert('PayPal', err instanceof Error ? err.message : 'Could not complete payment.');
+    } finally {
+      setPaypalCompleteBusy(false);
+    }
   };
 
   const handleGinto = async () => {
@@ -94,14 +177,17 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
 
   const handleConfirmTopup = async () => {
     const parsed = Number(amountPesos.trim());
-    if (!Number.isFinite(parsed) || parsed < 2) {
-      Alert.alert('Invalid amount', 'Minimum amount is 2 pesos.');
+    if (!Number.isFinite(parsed) || parsed < CHECKOUT_MIN_PESOS) {
+      Alert.alert(
+        'Invalid amount',
+        `Minimum top-up is ${CHECKOUT_MIN_PESOS} PHP. At ${PESOS_PER_TOKEN} PHP per token, that is ${MIN_CHECKOUT_TOKEN_EQUIVALENT} tokens.`,
+      );
       return;
     }
     const wholePesos = Math.floor(parsed);
-    const tokensToAdd = Math.floor(wholePesos / 2);
+    const tokensToAdd = Math.floor(wholePesos / PESOS_PER_TOKEN);
     if (tokensToAdd < 1) {
-      Alert.alert('Invalid amount', 'Every 2 pesos adds 1 token.');
+      Alert.alert('Invalid amount', `Every ${PESOS_PER_TOKEN} pesos adds 1 token.`);
       return;
     }
     const token = await getStoredAccessToken();
@@ -111,10 +197,94 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
     }
     try {
       setIsBuying(true);
-      const result = await purchaseTokens(token, selectedProvider, wholePesos);
-      setPremiumCredits(result.premium_credits);
-      setTopupVisible(false);
-      Alert.alert('Top-up successful', `Added ${result.tokens_added} token(s).`);
+      try {
+        const mode = checkoutProvider ?? 'paymongo';
+        let checkout: CheckoutSessionResult;
+        let paymongoAuthReturn: string | undefined;
+        if (mode === 'paypal') {
+          checkout = await createPaypalCheckout(token, wholePesos);
+        } else {
+          paymongoAuthReturn = ExpoLinking.createURL('checkout-done');
+          try {
+            checkout = await createPaymongoCheckout(token, selectedProvider, wholePesos, {
+              returnSuccessUrl: paymongoAuthReturn,
+              returnCancelUrl: paymongoAuthReturn,
+            });
+          } catch (firstErr) {
+            paymongoAuthReturn = 'swerte3://checkout-done';
+            try {
+              checkout = await createPaymongoCheckout(token, selectedProvider, wholePesos, {
+                returnSuccessUrl: paymongoAuthReturn,
+                returnCancelUrl: paymongoAuthReturn,
+              });
+            } catch {
+              throw firstErr;
+            }
+          }
+        }
+        if (checkout.amount_pesos < CHECKOUT_MIN_PESOS) {
+          Alert.alert(
+            'Backend is outdated',
+            `The server opened a ${checkout.amount_pesos} PHP checkout. Minimum is ${CHECKOUT_MIN_PESOS} PHP. Redeploy the API.`,
+          );
+          return;
+        }
+        if (checkout.amount_pesos !== wholePesos) {
+          Alert.alert(
+            'Amount mismatch',
+            `You asked for ${wholePesos} PHP but the server returned ${checkout.amount_pesos} PHP. Do not pay on that page; fix the API.`,
+          );
+          return;
+        }
+        setTopupVisible(false);
+        if (mode === 'paypal') {
+          const canOpen = await Linking.canOpenURL(checkout.checkout_url);
+          if (!canOpen) {
+            Alert.alert('Checkout', 'Cannot open payment page on this device.');
+            return;
+          }
+          await Linking.openURL(checkout.checkout_url);
+          setPendingPaypalOrderId(checkout.checkout_session_id);
+          Alert.alert(
+            'PayPal',
+            'After you approve payment in PayPal, return to this app and tap “Complete PayPal payment” on Home to add tokens.',
+          );
+        } else {
+          setPendingPaypalOrderId(null);
+          const returnForSession = paymongoAuthReturn ?? ExpoLinking.createURL('checkout-done');
+          try {
+            const auth = await WebBrowser.openAuthSessionAsync(checkout.checkout_url, returnForSession);
+            void loadPremiumCredits();
+            if (auth.type === 'success') {
+              Alert.alert(
+                'Balik sa app',
+                'Kung hindi pa tumataas ang tokens, maghintay ng ilang segundo (webhook) o i-pull down para mag-refresh.',
+              );
+            }
+          } catch {
+            const canOpen = await Linking.canOpenURL(checkout.checkout_url);
+            if (!canOpen) {
+              Alert.alert('Checkout', 'Cannot open payment page on this device.');
+              return;
+            }
+            await Linking.openURL(checkout.checkout_url);
+            Alert.alert(
+              'PayMongo',
+              'Nagbukas ang browser. Pagkatapos magbayad, pumunta nang manual sa app; ang credits ay dumarating sa webhook.',
+            );
+          }
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '';
+        if (msg.includes('410') || msg.toLowerCase().includes('gone')) {
+          const result = await purchaseTokens(token, 'gcash', wholePesos);
+          setPremiumCredits(result.premium_credits);
+          setTopupVisible(false);
+          Alert.alert('Top-up successful', `Added ${result.tokens_added} token(s). (dev mode)`);
+        } else {
+          throw e;
+        }
+      }
     } catch (err) {
       Alert.alert('Top-up failed', err instanceof Error ? err.message : 'Please try again.');
     } finally {
@@ -172,6 +342,33 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
             </View>
           </Card.Content>
         </Card>
+
+        {checkoutProvider === 'paypal' && pendingPaypalOrderId ? (
+          <Card style={[styles.card, styles.paypalPendingCard]} mode="elevated" accessibilityLabel="PayPal pending">
+            <Card.Content>
+              <Title style={styles.paypalPendingTitle}>PayPal pending</Title>
+              <Text style={styles.paypalPendingText}>
+                Finish approving payment in PayPal, then tap below to capture the order and add tokens to your account.
+              </Text>
+              <View style={styles.paypalPendingActions}>
+                <Button
+                  mode="contained"
+                  onPress={() => void handleCompletePaypal()}
+                  loading={paypalCompleteBusy}
+                  disabled={paypalCompleteBusy}
+                  buttonColor="#0070ba"
+                  textColor="#ffffff"
+                  style={styles.paypalCompleteBtn}
+                >
+                  Complete PayPal payment
+                </Button>
+                <Button mode="text" onPress={() => setPendingPaypalOrderId(null)} textColor="#4a5568">
+                  Dismiss
+                </Button>
+              </View>
+            </Card.Content>
+          </Card>
+        ) : null}
 
         <Card
           style={[styles.card, styles.cardAccent]}
@@ -299,7 +496,10 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
               Premium ang Elite (MiroFish): maraming matalinong AI ang tumatakbo, kaya may konting bayad sa
               server.
             </RNText>
-            <RNText style={styles.noTokenPrice}>1 token = 2 pesos</RNText>
+            <RNText style={styles.noTokenPrice}>
+              1 token = {PESOS_PER_TOKEN} pesos — smallest top-up {CHECKOUT_MIN_PESOS} pesos ({MIN_CHECKOUT_TOKEN_EQUIVALENT}{' '}
+              tokens)
+            </RNText>
             <RNText style={styles.noTokenAction}>Pindutin ang Add Tokens sa ibaba para magpatuloy.</RNText>
             <View style={styles.modalActions}>
               <Pressable
@@ -325,40 +525,50 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
           <View style={styles.modalCard}>
             <RNText style={styles.modalTitle}>Add Tokens</RNText>
             <RNText style={styles.topupLead}>
-              Pick your wallet and how much to pay.{' '}
-              <RNText style={styles.topupLeadEm}>2 pesos = 1 token.</RNText>
+              <RNText style={styles.topupLeadEm}>
+                {PESOS_PER_TOKEN} PHP = 1 token.
+              </RNText>{' '}
+              Minimum {CHECKOUT_MIN_PESOS} PHP — smallest purchase is {MIN_CHECKOUT_TOKEN_EQUIVALENT} tokens (
+              {CHECKOUT_MIN_PESOS} ÷ {PESOS_PER_TOKEN}).
+              {checkoutProvider === 'paypal'
+                ? ' You pay with PayPal.'
+                : ' PayMongo hosted checkout (GCash / Maya / card / QR when enabled on your merchant).'}
             </RNText>
             <RNText style={styles.topupNote}>
-              Elite uses extra AI power—tokens help cover that cost.
+              {checkoutProvider === 'paypal'
+                ? 'After PayPal, tap “Complete PayPal payment” on Home.'
+                : 'Credits update after payment via server webhook; return to Home to refresh balance.'}
             </RNText>
-            <View style={styles.providerRow}>
-              {(['gcash', 'maya', 'gotyme'] as const).map((provider) => {
-                const selected = provider === selectedProvider;
-                return (
-                  <Pressable
-                    key={provider}
-                    onPress={() => setSelectedProvider(provider)}
-                    style={[styles.providerChip, selected && styles.providerChipSelected]}
-                  >
-                    <RNText style={[styles.providerChipText, selected && styles.providerChipTextSelected]}>
-                      {provider.toUpperCase()}
-                    </RNText>
-                  </Pressable>
-                );
-              })}
-            </View>
+            {checkoutProvider !== 'paypal' ? (
+              <View style={styles.providerRow}>
+                {(['gcash', 'maya', 'gotyme'] as const satisfies readonly TopupProvider[]).map((provider) => {
+                  const selected = provider === selectedProvider;
+                  return (
+                    <Pressable
+                      key={provider}
+                      onPress={() => setSelectedProvider(provider)}
+                      style={[styles.providerChip, selected && styles.providerChipSelected]}
+                    >
+                      <RNText style={[styles.providerChipText, selected && styles.providerChipTextSelected]}>
+                        {TOPUP_PROVIDER_LABEL[provider]}
+                      </RNText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
             <RNText style={styles.inputLabel}>Amount (PHP)</RNText>
             <TextInput
               value={amountPesos}
               onChangeText={setAmountPesos}
               keyboardType="number-pad"
-              placeholder="e.g. 10"
+              placeholder={`e.g. ${CHECKOUT_MIN_PESOS}`}
               placeholderTextColor="#6b7280"
               style={styles.amountInput}
               editable={!isBuying}
             />
             <RNText style={styles.previewText}>
-              Tokens to add: {Math.max(0, Math.floor((Number(amountPesos) || 0) / 2))}
+              Tokens to add: {Math.max(0, Math.floor((Number(amountPesos) || 0) / PESOS_PER_TOKEN))}
             </RNText>
             <View style={styles.modalActions}>
               <Pressable
@@ -421,6 +631,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#b8dfb9',
   },
+  paypalPendingCard: {
+    backgroundColor: '#e8f4fc',
+    borderColor: '#90cdf4',
+    borderWidth: 1,
+  },
+  paypalPendingTitle: { fontSize: 20, color: '#1a365d', marginBottom: 8 },
+  paypalPendingText: { fontSize: 14, color: '#2d3748', lineHeight: 20, marginBottom: 12 },
+  paypalPendingActions: { gap: 4 },
+  paypalCompleteBtn: { marginBottom: 4 },
   cardLuckyPick: {
     overflow: 'hidden',
     borderColor: '#9dcea2',
