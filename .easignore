@@ -1,0 +1,39 @@
+# EAS upload rules (overrides .gitignore for `eas build`).
+# See https://docs.expo.dev/build-reference/easignore/
+
+# --- Same as repo .gitignore (required when .easignore exists) ---
+backend/.env
+mobile/.env
+.env
+.env.local
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.venv/
+backend/venv/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+backend/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- EAS / mobile build only ---
+# FastAPI backend is not compiled on EAS; skipping it avoids Windows EPERM on
+# folders like backend/.pytest_cache (OneDrive / ACL) during tarball upload.
+backend/
