@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.deps import get_current_user, get_db
+from app.deps import get_db, get_user_for_daily_tips
 from app.models.daily_picture_analysis import DailyPictureAnalysis
 from app.models.user import User
 from app.services.picture_analysis_image import PICTURE_ANALYSIS_RENDER_VERSION, generate_bw_cartoon
@@ -78,7 +78,7 @@ def _hint_for_theme(theme_key: str | None) -> str:
 @router.get("/daily", response_model=DailyPictureResponse)
 def get_daily_picture(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_for_daily_tips),
 ) -> DailyPictureResponse:
     cal = _calendar_date_manila()
     settings = get_settings()

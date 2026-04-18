@@ -22,6 +22,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { logEvent } from '../analytics';
+import { SWERTRES_LEGAL_CAPTION, SWERTRES_LEGAL_CAPTION_TL } from '../constants/disclaimers';
 import type { DailyPredictionResponse, DrawSession } from '../services/api';
 import { fetchDailyPredictions } from '../services/api';
 import type { RootStackParamList } from '../navigation/types';
@@ -195,6 +196,8 @@ export function PredictScreen(_props: Props): React.ReactElement {
           <Text style={styles.heroSub}>
             Pumili ng petsang mahalaga sa iyo—hindi na kailangang i-type ang buong format.
           </Text>
+          <RNText style={styles.swertresLegal}>{SWERTRES_LEGAL_CAPTION}</RNText>
+          <RNText style={styles.swertresLegalTl}>{SWERTRES_LEGAL_CAPTION_TL}</RNText>
         </View>
 
         <View style={styles.dateShell}>
@@ -378,6 +381,8 @@ export function PredictScreen(_props: Props): React.ReactElement {
                 </Card>
               );
             })}
+            <RNText style={styles.swertresLegalFooter}>{SWERTRES_LEGAL_CAPTION}</RNText>
+            <RNText style={styles.swertresLegalFooterTl}>{SWERTRES_LEGAL_CAPTION_TL}</RNText>
           </View>
         ) : null}
       </ScrollView>
@@ -443,6 +448,39 @@ const styles = StyleSheet.create({
     color: '#2d4f3a',
     fontWeight: '600',
     letterSpacing: 0.1,
+  },
+  swertresLegal: {
+    marginTop: 14,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#3d5c47',
+    fontWeight: '600',
+    opacity: 0.92,
+  },
+  swertresLegalTl: {
+    marginTop: 6,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#4a6b54',
+    fontStyle: 'italic',
+    opacity: 0.9,
+  },
+  swertresLegalFooter: {
+    marginTop: 18,
+    fontSize: 11,
+    lineHeight: 16,
+    color: 'rgba(13,40,24,0.75)',
+    textAlign: 'center',
+    paddingHorizontal: 12,
+  },
+  swertresLegalFooterTl: {
+    marginTop: 6,
+    fontSize: 11,
+    lineHeight: 16,
+    color: 'rgba(13,40,24,0.65)',
+    textAlign: 'center',
+    paddingHorizontal: 12,
+    fontStyle: 'italic',
   },
   dateShell: {
     backgroundColor: 'rgba(255,255,255,0.94)',

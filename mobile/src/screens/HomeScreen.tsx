@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   AppState,
   Image,
@@ -15,10 +16,12 @@ import {
 } from 'react-native';
 import * as ExpoLinking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Button, Card, Text, Title } from 'react-native-paper';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { clearAuthTokens, getStoredAccessToken } from '../auth/storage';
+import { getStoredAccessToken, saveAuthTokens } from '../auth/storage';
+import { HOME_ENTERTAINMENT_CAPTION, HOME_ENTERTAINMENT_CAPTION_TL } from '../constants/disclaimers';
 import { logScreenView } from '../analytics';
 import {
   capturePaypalOrder,
@@ -27,7 +30,9 @@ import {
   fetchPaymentConfig,
   fetchUserMe,
   purchaseTokens,
+  registerGuestSession,
   startPremiumBatch,
+  userNeedsProfile,
   type CheckoutSessionResult,
 } from '../services/api';
 import type { RootStackParamList } from '../navigation/types';
@@ -60,24 +65,73 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
   const [selectedProvider, setSelectedProvider] = useState<TopupProvider>('gcash');
   const [pendingPaypalOrderId, setPendingPaypalOrderId] = useState<string | null>(null);
   const [paypalCompleteBusy, setPaypalCompleteBusy] = useState(false);
+  const [profileComplete, setProfileComplete] = useState(false);
+  const [profilePhone, setProfilePhone] = useState<string | null>(null);
+  const [profileAlias, setProfileAlias] = useState<string | null>(null);
+  /** False until the latest refreshWallet attempt finishes (avoids invisible strip while /me loads). */
+  const [accountBarReady, setAccountBarReady] = useState(false);
+  /** Ignore stale async results when focus + AppState fire refreshWallet in parallel. */
+  const refreshWalletSeq = useRef(0);
 
   useEffect(() => {
     void logScreenView('Home');
   }, []);
 
-  const loadPremiumCredits = useCallback(async () => {
-    const token = await getStoredAccessToken();
-    if (!token?.trim()) {
-      setPremiumCredits(null);
-      return;
+  const refreshWallet = useCallback(async () => {
+    const seq = ++refreshWalletSeq.current;
+    let token = (await getStoredAccessToken())?.trim() ?? '';
+    if (!token) {
+      try {
+        const pair = await registerGuestSession();
+        await saveAuthTokens(pair.access_token, pair.refresh_token);
+        token = pair.access_token;
+      } catch {
+        if (seq !== refreshWalletSeq.current) return;
+        setPremiumCredits(null);
+        setProfileComplete(false);
+        setProfilePhone(null);
+        setProfileAlias(null);
+        setAccountBarReady(true);
+        return;
+      }
     }
     try {
       const me = await fetchUserMe(token);
-      setPremiumCredits(me.premium_credits);
+      if (seq !== refreshWalletSeq.current) return;
+
+      const raw = me as Record<string, unknown>;
+      const phoneRaw = me.phone ?? raw.phone_e164 ?? raw.phoneE164;
+      const phoneStr =
+        typeof phoneRaw === 'string' && phoneRaw.trim() ? phoneRaw.trim() : null;
+
+      const aliasRaw = me.display_alias ?? raw.display_alias ?? raw.displayAlias;
+      const aliasStr =
+        aliasRaw != null && String(aliasRaw).trim() ? String(aliasRaw).trim() : null;
+
+      const creditsNum = Number(me.premium_credits ?? raw.premium_credits ?? 0);
+      setPremiumCredits(Number.isFinite(creditsNum) ? Math.max(0, Math.floor(creditsNum)) : 0);
+      const needsProfile = userNeedsProfile(me);
+      setProfileComplete(!needsProfile);
+      setProfilePhone(phoneStr);
+      setProfileAlias(aliasStr);
+
+      if (needsProfile) {
+        navigation.replace('ProfileSetup', { from: 'complete_profile' });
+      }
     } catch {
+      if (seq !== refreshWalletSeq.current) return;
       setPremiumCredits(null);
+      setProfileComplete(false);
+      setProfilePhone(null);
+      setProfileAlias(null);
+      // Don’t leave users on Home with empty account — send them to Profile (recovery + retry).
+      navigation.replace('ProfileSetup', { from: 'complete_profile' });
+    } finally {
+      if (seq === refreshWalletSeq.current) {
+        setAccountBarReady(true);
+      }
     }
-  }, []);
+  }, [navigation]);
 
   const refreshCheckoutProvider = useCallback(async () => {
     try {
@@ -90,23 +144,17 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
 
   useFocusEffect(
     useCallback(() => {
-      void loadPremiumCredits();
+      void refreshWallet();
       void refreshCheckoutProvider();
-    }, [loadPremiumCredits, refreshCheckoutProvider]),
+    }, [refreshWallet, refreshCheckoutProvider]),
   );
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void loadPremiumCredits();
+      if (state === 'active') void refreshWallet();
     });
     return () => sub.remove();
-  }, [loadPremiumCredits]);
-
-  const handleLogout = async () => {
-    setPendingPaypalOrderId(null);
-    await clearAuthTokens();
-    navigation.reset({ index: 0, routes: [{ name: 'Auth' }] });
-  };
+  }, [refreshWallet]);
 
   const handleCompletePaypal = async () => {
     if (!pendingPaypalOrderId?.trim() || paypalCompleteBusy) return;
@@ -254,7 +302,7 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
           const returnForSession = paymongoAuthReturn ?? ExpoLinking.createURL('checkout-done');
           try {
             const auth = await WebBrowser.openAuthSessionAsync(checkout.checkout_url, returnForSession);
-            void loadPremiumCredits();
+            void refreshWallet();
             if (auth.type === 'success') {
               Alert.alert(
                 'Balik sa app',
@@ -298,23 +346,87 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
       contentContainerStyle={styles.scrollContent}
       accessibilityLabel="Home scroll content"
     >
-      <View style={styles.hero} accessibilityLabel="Swerte3">
-        <Image
-          source={logoSource}
-          style={styles.logo}
-          resizeMode="contain"
-          accessibilityLabel="Swerte3 logo"
-          accessibilityRole="image"
+      <LinearGradient
+        colors={['#071a10', '#123d28', '#1b5640']}
+        locations={[0, 0.45, 1]}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={styles.hero}
+        accessibilityLabel="Swerte3"
+      >
+        <View style={styles.heroGlowOrb} pointerEvents="none" />
+
+        <View style={styles.profileGlass} accessibilityLabel="Account mobile and alias">
+          {!accountBarReady ? (
+            <View style={styles.profileIdentityLoadingWrap}>
+              <ActivityIndicator color="#ecffe9" style={styles.profileIdentitySpinner} />
+              <RNText style={styles.profileIdentityLoading}>Loading account…</RNText>
+            </View>
+          ) : (
+            <View style={styles.profileGlassInner}>
+              <View style={[styles.profileCol, styles.profileColLeft]}>
+                <RNText style={styles.profileIdentityLabel}>Mobile</RNText>
+                <RNText style={styles.profileIdentityPhone} numberOfLines={1} ellipsizeMode="tail">
+                  {profilePhone ?? '—'}
+                </RNText>
+              </View>
+              <View style={styles.profileDivider} />
+              <View style={[styles.profileCol, styles.profileColRight]}>
+                <RNText style={[styles.profileIdentityLabel, styles.profileIdentityLabelRight]}>Alias</RNText>
+                <RNText style={styles.profileIdentityAlias} numberOfLines={1} ellipsizeMode="tail">
+                  {profileAlias ?? '—'}
+                </RNText>
+              </View>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.logoWrap}>
+          <LinearGradient
+            colors={['rgba(255,214,120,0.22)', 'rgba(255,255,255,0)', 'rgba(72,187,120,0.12)']}
+            style={styles.logoGlow}
+            pointerEvents="none"
+          />
+          <Image
+            source={logoSource}
+            style={styles.logo}
+            resizeMode="contain"
+            accessibilityLabel="Swerte3 logo"
+            accessibilityRole="image"
+          />
+        </View>
+
+        <LinearGradient
+          colors={['rgba(212,175,55,0.55)', 'rgba(236,255,233,0.35)', 'rgba(72,187,120,0.5)']}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={styles.heroBottomSheen}
+          pointerEvents="none"
         />
-      </View>
+      </LinearGradient>
 
       <View style={styles.sheet}>
+        <LinearGradient
+          colors={['#f0fff4', '#dff1de', '#d2ebd4']}
+          locations={[0, 0.35, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.sheetGradientBg}
+          pointerEvents="none"
+        />
+        <View style={styles.sheetContent}>
         <Card
           style={[styles.card, styles.cardLuckyPick]}
           mode="elevated"
           accessibilityLabel="LuckyPick free predictions card"
         >
-          <View style={styles.luckyPickStripe} />
+          <LinearGradient
+            colors={['#134e2e', '#276749', '#48bb78']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.luckyPickStripe}
+            pointerEvents="none"
+          />
           <Card.Content style={styles.cardContentTight}>
             <View style={styles.titleRowLuckyPick}>
               <Title style={styles.cardTitle}>LuckyPick</Title>
@@ -375,6 +487,13 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
           mode="outlined"
           accessibilityLabel="Elite premium card"
         >
+          <LinearGradient
+            colors={['#8b6914', '#d4af37', '#f0d78c']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.eliteStripe}
+            pointerEvents="none"
+          />
           <Card.Content>
             <View style={styles.titleRow}>
               <Title style={styles.cardTitle}>Elite</Title>
@@ -407,14 +526,23 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
                 <RNText style={styles.addTokensBtnText}>Add Tokens</RNText>
               </Pressable>
               <View
-                style={styles.tokenCircle}
+                style={styles.tokenRingWrap}
                 accessibilityLabel={
                   premiumCredits === null ? 'Premium credits unknown' : `Premium credits ${premiumCredits}`
                 }
               >
-                <RNText style={styles.tokenCircleText}>
-                  {premiumCredits === null ? '—' : String(premiumCredits)}
-                </RNText>
+                <LinearGradient
+                  colors={['#c9a227', '#f4e4a6', '#b8860b']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.tokenRing}
+                >
+                  <View style={styles.tokenCircleInner}>
+                    <RNText style={styles.tokenCircleText}>
+                      {premiumCredits === null ? '—' : String(premiumCredits)}
+                    </RNText>
+                  </View>
+                </LinearGradient>
               </View>
             </View>
           </Card.Content>
@@ -467,17 +595,28 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
           </View>
         </View>
 
-        <View style={styles.logoutRow}>
-          <Button
-            mode="outlined"
-            onPress={handleLogout}
-            accessibilityLabel="Log out"
-            style={styles.btnLogout}
-            textColor="#1f5130"
-            contentStyle={styles.btnContent}
-          >
-            Log out
-          </Button>
+        {profileComplete ? (
+          <View style={styles.editProfileRow}>
+            <Button
+              mode="outlined"
+              onPress={() => navigation.navigate('ProfileSetup', { from: 'home' })}
+              textColor="#1f5130"
+              style={styles.editProfileBtn}
+              accessibilityLabel="Edit mobile number or alias"
+            >
+              Edit profile
+            </Button>
+          </View>
+        ) : null}
+
+        <View
+          style={styles.homeFooterDisclaimer}
+          accessibilityRole="text"
+          accessibilityLabel={`${HOME_ENTERTAINMENT_CAPTION} ${HOME_ENTERTAINMENT_CAPTION_TL}`}
+        >
+          <RNText style={styles.homeFooterDisclaimerText}>{HOME_ENTERTAINMENT_CAPTION}</RNText>
+          <RNText style={styles.homeFooterDisclaimerTl}>{HOME_ENTERTAINMENT_CAPTION_TL}</RNText>
+        </View>
         </View>
       </View>
       <Modal
@@ -594,7 +733,7 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1, backgroundColor: '#1e4a31' },
+  scroll: { flex: 1, backgroundColor: '#dff1de' },
   scrollContent: {
     flexGrow: 1,
     ...(Platform.OS === 'web'
@@ -603,33 +742,179 @@ const styles = StyleSheet.create({
   },
   hero: {
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === 'web' ? 32 : 24,
-    paddingBottom: 16,
-    backgroundColor: '#1e4a31',
-    borderBottomWidth: 3,
-    borderBottomColor: '#86c88f',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'web' ? 20 : 10,
+    paddingBottom: 20,
+    width: '100%',
+    overflow: 'hidden',
+    position: 'relative',
+    zIndex: 2,
+    ...(Platform.OS === 'web' ? {} : { elevation: 6 }),
+  },
+  heroGlowOrb: {
+    position: 'absolute',
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    top: -100,
+    right: -70,
+    backgroundColor: 'rgba(212, 175, 55, 0.14)',
+  },
+  profileGlass: {
+    alignSelf: 'stretch',
+    maxWidth: 420,
+    width: '100%',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    backgroundColor: 'rgba(0, 0, 0, 0.18)',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.22,
+        shadowRadius: 12,
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
+  },
+  profileGlassInner: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    justifyContent: 'space-between',
+    minHeight: 64,
+  },
+  profileCol: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+    paddingVertical: 2,
+  },
+  profileColLeft: {
+    alignItems: 'flex-start',
+    paddingRight: 8,
+  },
+  profileColRight: {
+    alignItems: 'flex-end',
+    paddingLeft: 8,
+  },
+  profileDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    alignSelf: 'stretch',
+    marginVertical: 0,
+    opacity: 0.95,
+  },
+  profileIdentityLoadingWrap: {
+    minHeight: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+  },
+  profileIdentitySpinner: {
+    marginBottom: 6,
+  },
+  profileIdentityLoading: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(236, 255, 233, 0.88)',
+    textAlign: 'center',
+  },
+  profileIdentityLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: 'rgba(220, 237, 224, 0.72)',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase',
+    textAlign: 'left',
+    marginBottom: 6,
+  },
+  profileIdentityLabelRight: {
+    textAlign: 'right',
+  },
+  profileIdentityPhone: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#f4fff1',
+    letterSpacing: 0.5,
+    textAlign: 'left',
+    lineHeight: 20,
+  },
+  profileIdentityAlias: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#fffffe',
+    letterSpacing: 0.25,
+    textAlign: 'right',
+    lineHeight: 22,
+    maxWidth: '100%',
+  },
+  logoWrap: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  logoGlow: {
+    position: 'absolute',
+    width: 208,
+    height: 208,
+    borderRadius: 104,
+    opacity: 0.85,
   },
   logo: {
-    width: 168,
-    height: 168,
+    width: 176,
+    height: 176,
+    ...(Platform.OS === 'web' ? { maxWidth: '100%' as const } : {}),
+  },
+  heroBottomSheen: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    opacity: 0.95,
   },
   sheet: {
-    flex: 1,
-    backgroundColor: '#dff1de',
-    paddingHorizontal: 20,
-    paddingTop: 20,
+    position: 'relative',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 18,
+    paddingTop: 22,
     paddingBottom: 48,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    marginTop: -12,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    marginTop: -16,
+    overflow: 'hidden',
+    zIndex: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#0a1f14',
+        shadowOffset: { width: 0, height: -6 },
+        shadowOpacity: 0.12,
+        shadowRadius: 14,
+      },
+      android: { elevation: 8 },
+      default: {},
+    }),
+  },
+  sheetGradientBg: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  sheetContent: {
+    position: 'relative',
+    zIndex: 1,
   },
   card: {
     marginBottom: 16,
-    borderRadius: 16,
-    backgroundColor: '#f3fff1',
+    borderRadius: 18,
+    backgroundColor: '#f8fff6',
     borderWidth: 1,
-    borderColor: '#b8dfb9',
+    borderColor: '#a8dcc0',
+    overflow: 'hidden',
   },
   paypalPendingCard: {
     backgroundColor: '#e8f4fc',
@@ -641,23 +926,27 @@ const styles = StyleSheet.create({
   paypalPendingActions: { gap: 4 },
   paypalCompleteBtn: { marginBottom: 4 },
   cardLuckyPick: {
-    overflow: 'hidden',
-    borderColor: '#9dcea2',
+    borderColor: '#7dce99',
     ...Platform.select({
       ios: {
-        shadowColor: '#1a4d2e',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.12,
-        shadowRadius: 8,
+        shadowColor: '#0f2818',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.18,
+        shadowRadius: 18,
       },
-      android: { elevation: 4 },
+      android: { elevation: 7 },
       default: {},
     }),
   },
+  editProfileRow: { alignItems: 'center', marginTop: 8, marginBottom: 8 },
+  editProfileBtn: { borderColor: '#6aa174', borderRadius: 12 },
   luckyPickStripe: {
+    height: 5,
+    width: '100%',
+  },
+  eliteStripe: {
     height: 4,
-    backgroundColor: '#2f855a',
-    opacity: 0.9,
+    width: '100%',
   },
   cardContentTight: { paddingTop: 14 },
   titleRowLuckyPick: {
@@ -668,12 +957,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   luckyPickPill: {
-    backgroundColor: 'rgba(47, 133, 90, 0.14)',
+    backgroundColor: 'rgba(72, 187, 120, 0.22)',
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(47, 133, 90, 0.35)',
+    borderColor: 'rgba(39, 103, 73, 0.45)',
   },
   luckyPickPillText: {
     fontSize: 11,
@@ -684,7 +973,18 @@ const styles = StyleSheet.create({
   },
   cardAccent: {
     borderWidth: 1,
-    borderColor: '#7fbf87',
+    borderColor: '#9dcc93',
+    backgroundColor: '#f4fff1',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#6b5c12',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.12,
+        shadowRadius: 12,
+      },
+      android: { elevation: 5 },
+      default: {},
+    }),
   },
   cardTitle: {
     fontSize: 42,
@@ -705,11 +1005,12 @@ const styles = StyleSheet.create({
   },
   superTag: {
     fontSize: 11,
-    color: '#3f6950',
+    color: '#4f6d42',
     fontStyle: 'italic',
     marginTop: 8,
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
     textTransform: 'lowercase',
+    fontWeight: '600',
   },
   row: {
     flexDirection: 'row',
@@ -747,11 +1048,44 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     fontSize: 19,
   },
-  btnMain: { borderRadius: 14 },
+  btnMain: {
+    borderRadius: 14,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#1a4d2e',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+      },
+      android: { elevation: 5 },
+      default: {},
+    }),
+  },
   btnSecondary: { borderRadius: 12, borderColor: '#6aa174' },
-  logoutRow: { alignItems: 'flex-end', marginTop: 4 },
-  btnLogout: { alignSelf: 'flex-end', borderRadius: 12, borderColor: '#6aa174' },
-  btnContent: { paddingVertical: 4 },
+  homeFooterDisclaimer: {
+    marginTop: 18,
+    paddingHorizontal: 12,
+    paddingBottom: 28,
+    alignItems: 'center',
+    alignSelf: 'stretch',
+  },
+  homeFooterDisclaimerText: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: '#4a6b54',
+    textAlign: 'center',
+    fontWeight: '600',
+    maxWidth: 340,
+  },
+  homeFooterDisclaimerTl: {
+    fontSize: 11,
+    lineHeight: 15,
+    color: '#5c7568',
+    textAlign: 'center',
+    marginTop: 5,
+    fontStyle: 'italic',
+    maxWidth: 340,
+  },
   btnContentLuckyPick: { paddingVertical: 12, minHeight: 52 },
   btnLabelLuckyPick: { fontSize: 17, fontWeight: '900', letterSpacing: 0.6 },
   btnPremium: { marginTop: 0, borderRadius: 12 },
@@ -765,15 +1099,25 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   addTokensBtn: {
-    backgroundColor: '#2f855a',
+    backgroundColor: '#276749',
     paddingVertical: 10,
     paddingHorizontal: 16,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#276749',
+    borderColor: '#1f5a3c',
     minWidth: 108,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#0f2818',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.25,
+        shadowRadius: 6,
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
   },
   addTokensBtnPressed: { opacity: 0.88 },
   addTokensBtnText: {
@@ -782,30 +1126,36 @@ const styles = StyleSheet.create({
     fontSize: 13,
     letterSpacing: 0.3,
   },
-  tokenCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: 2,
-    borderColor: '#94a3b8',
-    backgroundColor: '#e2e8f0',
+  tokenRingWrap: {
+    marginLeft: 'auto',
+  },
+  tokenRing: {
+    borderRadius: 28,
+    padding: 2.5,
+    overflow: 'hidden',
+  },
+  tokenCircleInner: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#f1f5f9',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 'auto',
   },
   tokenCircleText: {
     fontSize: 17,
     fontWeight: '900',
-    color: '#475569',
+    color: '#334155',
   },
   exploreHeading: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#1a3d2a',
-    letterSpacing: 1.4,
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#134028',
+    letterSpacing: 3,
     textTransform: 'uppercase',
-    marginTop: 8,
-    marginBottom: 12,
+    marginTop: 10,
+    marginBottom: 14,
+    opacity: 0.92,
   },
   exploreRow: {
     flexDirection: 'row',
@@ -847,16 +1197,16 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   tileInnerA: {
-    backgroundColor: '#c9efd4',
-    borderColor: '#3d8f5c',
+    backgroundColor: '#c4efce',
+    borderColor: '#2d8a52',
   },
   tileInnerB: {
-    backgroundColor: '#bfe8d9',
-    borderColor: '#2f856f',
+    backgroundColor: '#b3e8da',
+    borderColor: '#248066',
   },
   tileInnerC: {
-    backgroundColor: '#d4edc9',
-    borderColor: '#4a9048',
+    backgroundColor: '#cae8be',
+    borderColor: '#3a8f3d',
   },
   tileAccent: {
     position: 'absolute',
@@ -864,7 +1214,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 5,
-    backgroundColor: '#1e4a31',
+    backgroundColor: '#143d2a',
   },
   squareLabel: {
     textAlign: 'center',

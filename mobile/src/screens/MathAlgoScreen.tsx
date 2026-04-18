@@ -76,7 +76,6 @@ export function MathAlgoScreen(_props: Props): React.ReactElement {
   }, [colW, gutter, width]);
 
   const [loading, setLoading] = useState(true);
-  const [needLogin, setNeedLogin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uri, setUri] = useState<string | null>(null);
   const [calendarDate, setCalendarDate] = useState<string | null>(null);
@@ -117,16 +116,9 @@ export function MathAlgoScreen(_props: Props): React.ReactElement {
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setNeedLogin(false);
     const token = await getStoredAccessToken();
-    if (!token) {
-      lastLoadedUserIdRef.current = null;
-      setNeedLogin(true);
-      setLoading(false);
-      return;
-    }
     try {
-      const d = await fetchDailyMathCognitive(token);
+      const d = await fetchDailyMathCognitive(token?.trim() || undefined);
       const uid = typeof d.user_id === 'number' ? d.user_id : null;
       if (uid != null) {
         if (lastLoadedUserIdRef.current !== null && lastLoadedUserIdRef.current !== uid) {
@@ -164,11 +156,11 @@ export function MathAlgoScreen(_props: Props): React.ReactElement {
   );
 
   const onSubmit = useCallback(async () => {
+    if (!guess || !allowGuess) return;
     const token = await getStoredAccessToken();
-    if (!token || !guess || !allowGuess) return;
     setSubmitting(true);
     try {
-      const r = await postMathCognitiveGuess(token, guess);
+      const r = await postMathCognitiveGuess(guess, token?.trim() || undefined);
       const bonusA = r.bonus_tip_digit_a;
       const bonusB = r.bonus_tip_digit_b;
       const bonusC = r.bonus_tip_digit_c;
@@ -219,13 +211,6 @@ export function MathAlgoScreen(_props: Props): React.ReactElement {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {needLogin ? (
-          <View style={[styles.panel, { width: colW }]}>
-            <Text style={styles.panelTitle}>Kailangan naka-log in</Text>
-            <Text style={styles.panelBody}>Mag-sign in muna para ma-load ang item ng araw.</Text>
-          </View>
-        ) : null}
-
         {loading ? (
           <View style={styles.loadingBlock}>
             <ActivityIndicator size="large" color={WHITE} />
@@ -273,9 +258,7 @@ export function MathAlgoScreen(_props: Props): React.ReactElement {
               <View style={styles.lockedBanner}>
                 <Text style={styles.lockedTitle}>Tapos na ang sagot ngayon</Text>
                 <Text style={styles.lockedBody}>
-                  Isang beses lang bawat araw bawat naka-log in na numero. Kung magpalit ng ibang
-                  numero, may hiwalay na sagot pa rin sila ngayong araw. Bumalik bukas para sa bagong
-                  challenge sa account na ito.
+                  Isang beses lang bawat araw ang pagsagot dito. Bumalik bukas para sa bagong challenge.
                 </Text>
               </View>
             ) : null}

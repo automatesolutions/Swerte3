@@ -29,8 +29,8 @@ export function PaywallScreen({ navigation }: Props): React.ReactElement {
           </Button>
         </Card.Content>
       </Card>
-      <Button onPress={() => navigation.navigate('Auth')} accessibilityLabel="Go to sign in before purchase">
-        Sign in first
+      <Button onPress={() => navigation.navigate('Home')} accessibilityLabel="Back to home">
+        Back to Home
       </Button>
     </ScrollView>
   );

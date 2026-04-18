@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ActivityIndicator } from 'react-native-paper';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { logEvent } from '../analytics';
+import { SWERTRES_LEGAL_CAPTION, SWERTRES_LEGAL_CAPTION_TL } from '../constants/disclaimers';
 import { getStoredAccessToken } from '../auth/storage';
 import type { RootStackParamList } from '../navigation/types';
 import type { DrawSession, PremiumPrediction } from '../services/api';
@@ -114,6 +115,9 @@ export function LihimPremiumScreen({ navigation }: Props): React.ReactElement {
             );
           })}
         </View>
+
+        <RNText style={styles.staticSwertresLegal}>{SWERTRES_LEGAL_CAPTION}</RNText>
+        <RNText style={styles.staticSwertresLegalTl}>{SWERTRES_LEGAL_CAPTION_TL}</RNText>
 
         <Pressable
           onPress={runPremium}
@@ -248,6 +252,24 @@ const styles = StyleSheet.create({
   },
   sessionChipText: { color: '#a8956a', fontWeight: '800', fontSize: 13 },
   sessionChipTextActive: { color: '#fff6d4' },
+  staticSwertresLegal: {
+    marginTop: 14,
+    paddingHorizontal: 8,
+    fontSize: 11,
+    lineHeight: 16,
+    color: 'rgba(232,220,190,0.72)',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  staticSwertresLegalTl: {
+    marginTop: 6,
+    paddingHorizontal: 8,
+    fontSize: 11,
+    lineHeight: 16,
+    color: 'rgba(201,178,122,0.7)',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
   goldCta: {
     marginTop: 22,
     borderRadius: 16,

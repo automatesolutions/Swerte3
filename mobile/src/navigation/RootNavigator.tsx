@@ -1,14 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import React from 'react';
+import { Platform } from 'react-native';
 import * as ExpoLinking from 'expo-linking';
 import type { LinkingOptions } from '@react-navigation/native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { getStoredAccessToken } from '../auth/storage';
 import { HomeScreen } from '../screens/HomeScreen';
+import { ProfileSetupScreen } from '../screens/ProfileSetupScreen';
 import { LihimPremiumScreen } from '../screens/LihimPremiumScreen';
 import { PredictScreen } from '../screens/PredictScreen';
-import { AuthScreen } from '../screens/AuthScreen';
+import { VideoHomeScreen } from '../screens/VideoHomeScreen';
 import { PaywallScreen } from '../screens/PaywallScreen';
 import { PictureAnalysisScreen } from '../screens/PictureAnalysisScreen';
 import { MathAlgoScreen } from '../screens/MathAlgoScreen';
@@ -18,10 +18,17 @@ import type { RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+/**
+ * Native: map PayPal return + main routes. Web: leave linking off — a partial config + URL sync
+ * breaks `navigation.reset` after Welcome (state gets reconciled back to `/` / wrong screen, and
+ * serializing `prefetchedMe` to the URL can fail or strip params).
+ */
 const linking: LinkingOptions<RootStackParamList> = {
   prefixes: [ExpoLinking.createURL('/'), 'swerte3://'],
   config: {
     screens: {
+      VideoHome: '',
+      ProfileSetup: 'profile-setup',
       Home: 'checkout-done',
     },
   },
@@ -33,44 +40,24 @@ const screenOptions = {
   headerTitleStyle: { fontWeight: '600' as const },
 };
 
+/**
+ * Welcome (video) is always the first screen on a cold start. Continue/Skip then goes to
+ * Profile (if needed) or Home — see VideoHomeScreen.continueAfterWelcome.
+ */
 export function RootNavigator(): React.ReactElement {
-  const [initialRoute, setInitialRoute] = useState<'Auth' | 'Home' | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const token = await getStoredAccessToken();
-        if (!cancelled) setInitialRoute(token ? 'Home' : 'Auth');
-      } catch {
-        if (!cancelled) setInitialRoute('Auth');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (initialRoute === null) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: '#0f172a',
-        }}
-        accessibilityLabel="Loading"
-      >
-        <ActivityIndicator size="large" color="#f8fafc" />
-      </View>
-    );
-  }
-
   return (
-    <NavigationContainer linking={linking}>
-      <Stack.Navigator initialRouteName={initialRoute} screenOptions={screenOptions}>
-        <Stack.Screen name="Auth" component={AuthScreen} options={{ title: 'Sign in' }} />
+    <NavigationContainer linking={Platform.OS === 'web' ? undefined : linking}>
+      <Stack.Navigator initialRouteName="VideoHome" screenOptions={screenOptions}>
+        <Stack.Screen
+          name="VideoHome"
+          component={VideoHomeScreen}
+          options={{ headerShown: false, title: 'Welcome' }}
+        />
+        <Stack.Screen
+          name="ProfileSetup"
+          component={ProfileSetupScreen}
+          options={{ title: 'Profile' }}
+        />
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Swerte3' }} />
         <Stack.Screen
           name="LihimPremium"
@@ -109,7 +96,6 @@ export function RootNavigator(): React.ReactElement {
             title: 'Analytics',
             headerStyle: { backgroundColor: '#0a1628' },
             headerTintColor: '#e2e8f0',
-            headerShadowVisible: false,
           }}
         />
         <Stack.Screen
@@ -119,7 +105,6 @@ export function RootNavigator(): React.ReactElement {
             title: analyticsFeatureTitle(route.params.kind),
             headerStyle: { backgroundColor: '#0a1628' },
             headerTintColor: '#e2e8f0',
-            headerShadowVisible: false,
           })}
         />
       </Stack.Navigator>

@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.deps import get_current_user, get_db
+from app.deps import get_db, get_user_for_daily_tips
 from app.models.daily_math_cognitive import DailyMathCognitive
 from app.models.user import User
 from app.services.math_cognitive_daily import (
@@ -117,7 +117,7 @@ def get_daily_math(
         description="When DEBUG=true, deletes today’s cached puzzle so the next image is rebuilt (dev / QA).",
     ),
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_for_daily_tips),
 ) -> DailyMathResponse:
     cal = _calendar_date_manila()
     settings = get_settings()
@@ -186,7 +186,7 @@ def get_daily_math(
 def post_daily_guess(
     body: GuessBody,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_user_for_daily_tips),
 ) -> GuessResponse:
     cal = _calendar_date_manila()
     row = (

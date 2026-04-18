@@ -57,18 +57,36 @@ function webDelete(key: string): void {
 }
 
 export async function getStoredAccessToken(): Promise<string | null> {
+  // Web: read localStorage first (authoritative after saveAuthTokens); fall back to SecureStore for older sessions.
+  if (Platform.OS === 'web') {
+    const fromLs = webGet(ACCESS_TOKEN_KEY);
+    if (fromLs?.trim()) return fromLs.trim();
+    const legacy = await safeSecureGet(ACCESS_TOKEN_KEY);
+    return legacy?.trim() ?? null;
+  }
   const secureValue = await safeSecureGet(ACCESS_TOKEN_KEY);
   if (secureValue) return secureValue;
   return webGet(ACCESS_TOKEN_KEY);
 }
 
 export async function getStoredRefreshToken(): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    const fromLs = webGet(REFRESH_TOKEN_KEY);
+    if (fromLs?.trim()) return fromLs.trim();
+    const legacy = await safeSecureGet(REFRESH_TOKEN_KEY);
+    return legacy?.trim() ?? null;
+  }
   const secureValue = await safeSecureGet(REFRESH_TOKEN_KEY);
   if (secureValue) return secureValue;
   return webGet(REFRESH_TOKEN_KEY);
 }
 
 export async function saveAuthTokens(accessToken: string, refreshToken: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    webSet(ACCESS_TOKEN_KEY, accessToken);
+    webSet(REFRESH_TOKEN_KEY, refreshToken);
+    return;
+  }
   const accessSaved = await safeSecureSet(ACCESS_TOKEN_KEY, accessToken);
   const refreshSaved = await safeSecureSet(REFRESH_TOKEN_KEY, refreshToken);
   if (!accessSaved) webSet(ACCESS_TOKEN_KEY, accessToken);
@@ -76,6 +94,12 @@ export async function saveAuthTokens(accessToken: string, refreshToken: string):
 }
 
 export async function clearAuthTokens(): Promise<void> {
+  if (Platform.OS === 'web') {
+    webDelete(ACCESS_TOKEN_KEY);
+    webDelete(REFRESH_TOKEN_KEY);
+    await Promise.all([safeSecureDelete(ACCESS_TOKEN_KEY), safeSecureDelete(REFRESH_TOKEN_KEY)]);
+    return;
+  }
   await Promise.all([safeSecureDelete(ACCESS_TOKEN_KEY), safeSecureDelete(REFRESH_TOKEN_KEY)]);
   webDelete(ACCESS_TOKEN_KEY);
   webDelete(REFRESH_TOKEN_KEY);

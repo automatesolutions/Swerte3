@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.database import Base, engine
+from app.database import Base, engine, ensure_users_table_schema
 from app.routers import analytics, auth, health, ingest, math_cognitive, payments, picture_analysis, predict
 
 logging.basicConfig(level=logging.INFO)
@@ -39,4 +39,10 @@ app.include_router(math_cognitive.router, prefix="/api")
 def startup():
     import app.models  # noqa: F401 — register all ORM tables
     Base.metadata.create_all(bind=engine)
+    try:
+        ensure_users_table_schema(engine)
+    except Exception:
+        logger.exception(
+            "ensure_users_table_schema failed — run `alembic upgrade head` or fix PostgreSQL permissions"
+        )
     logger.info("Swerte3 API started; tables ensured")

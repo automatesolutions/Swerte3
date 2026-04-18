@@ -43,21 +43,14 @@ export function PictureAnalysisScreen(_props: Props): React.ReactElement {
   const [calendarDate, setCalendarDate] = useState<string | null>(null);
   const [sceneHint, setSceneHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [needLogin, setNeedLogin] = useState(false);
   const [imgNatural, setImgNatural] = useState<{ w: number; h: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setNeedLogin(false);
     const token = await getStoredAccessToken();
-    if (!token) {
-      setNeedLogin(true);
-      setLoading(false);
-      return;
-    }
     try {
-      const d = await fetchDailyPictureAnalysis(token);
+      const d = await fetchDailyPictureAnalysis(token?.trim() || undefined);
       setImgNatural(null);
       setUri(`data:${d.mime_type};base64,${d.image_base64}`);
       setCalendarDate(d.calendar_date);
@@ -144,13 +137,6 @@ export function PictureAnalysisScreen(_props: Props): React.ReactElement {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {needLogin ? (
-          <View style={[styles.centerBox, { paddingHorizontal: gutter, maxWidth: contentW }]}>
-            <Text style={styles.errTitle}>Kailangan naka-log in</Text>
-            <Text style={styles.errBody}>Mag-sign in muna para makuha ang larawan ng araw mula sa server.</Text>
-          </View>
-        ) : null}
-
         {loading ? (
           <View style={[styles.centerBox, { minHeight: 200 }]}>
             <ActivityIndicator size="large" color="#4ade80" />
