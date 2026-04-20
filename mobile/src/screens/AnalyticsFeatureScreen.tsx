@@ -284,12 +284,6 @@ export function AnalyticsFeatureScreen({ route, navigation }: Props): React.Reac
               see weights below; drag nodes or use zoom to explore.{'\n'}• This is{' '}
               <Text style={styles.explainStrong}>historical co-occurrence only</Text> — not a forecast.
             </Text>
-            <Text style={styles.explainHeading}>Not the same as Cross-draw</Text>
-            <Text style={[styles.explainBody, { marginBottom: 12 }]}>
-              <Text style={styles.explainStrong}>Cross-draw transitions</Text> (other screen) track
-              digits across <Text style={styles.explainStrong}>consecutive draws</Text> (draw N → N+1).
-              This Co-occurrence screen is only about digits sharing one draw.
-            </Text>
             {cooc && cooc.links.length ? (
               <>
                 <View style={styles.graphBox}>

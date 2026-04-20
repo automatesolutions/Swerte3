@@ -216,7 +216,7 @@
           </tr>
           <tr>
             <td><strong>Backend (API)</strong></td>
-            <td>Login, database, PayMongo, everything “smart”</td>
+            <td>Login, database, GCash payments (server keys), everything “smart”</td>
             <td><strong>Run it</strong> (e.g. <code>uvicorn</code> on your PC) <strong>and</strong> expose it on the internet (e.g. <strong>ngrok</strong>) <strong>or</strong> deploy it (e.g. Google Cloud). Load <span class="path">backend/.env</span> (or cloud secrets) <strong>on that server</strong> — same as when <em>you</em> test.</td>
           </tr>
         </tbody>
@@ -256,7 +256,7 @@
       <ul>
         <li>The mobile app reads <code>EXPO_PUBLIC_API_URL</code> (see <span class="path">mobile/.env.example</span>). That value is <strong>inlined at build time</strong> when EAS runs Metro.</li>
         <li>After install, the app <strong>always</strong> calls whatever URL was baked into <strong>that</strong> build. It does <strong>not</strong> read your laptop’s <span class="path">mobile/.env</span> on each launch.</li>
-        <li><strong>PayMongo / PayPal / DB / JWT secrets</strong> belong in <span class="path">backend/.env</span> (or cloud secrets on the server). They are <strong>server-side only</strong> and are <strong>not</strong> inside the APK.</li>
+        <li><strong>GCash checkout keys (PayMongo API) / PayPal / DB / JWT secrets</strong> belong in <span class="path">backend/.env</span> (or cloud secrets on the server). They are <strong>server-side only</strong> and are <strong>not</strong> inside the APK.</li>
       </ul>
       <p><strong>Implication for friends:</strong> Their phones must reach <code>EXPO_PUBLIC_API_URL</code> on the internet. <code>http://127.0.0.1:8000</code>, <code>http://10.0.2.2:8000</code>, or a random LAN IP usually <strong>will not work</strong> for someone outside your Wi‑Fi.</p>
       <p><strong>Ngrok:</strong> If the APK was built with <code>https://OLD.ngrok-free.dev</code> and you restart ngrok, the old APK <strong>still</strong> calls OLD until you <strong>rebuild</strong> (unless you use a stable ngrok domain or a fixed deployed API URL).</p>
@@ -514,7 +514,7 @@ eas init</code></pre>
       <h2><span class="num">15.</span> One-line recap</h2>
       <p><strong>Android:</strong> Set <code>EXPO_PUBLIC_API_URL</code> for <strong>preview</strong> → <code>eas build --platform android --profile preview</code> → share link / QR / <code>.apk</code> (§10) → keep API running.</p>
       <p><strong>iPhone:</strong> Apple Developer Program → <code>eas build --platform ios --profile preview</code> (and submit to TestFlight) → friends use <strong>TestFlight</strong> (§14) → same API URL env as Android.</p>
-      <p>For payments/webhooks, see <span class="path">backend/.env.example</span> and PayMongo (webhook URL must match your <strong>public</strong> API host).</p>
+      <p>For GCash payments/webhooks, see <span class="path">backend/.env.example</span> — webhook URL must match your <strong>public</strong> API host.</p>
     </section>
   </div>
 </body>

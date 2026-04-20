@@ -1,0 +1,8 @@
+# Speed up `gcloud builds submit` — do not upload local venv or caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+.git/
+.gitignore

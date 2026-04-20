@@ -405,10 +405,22 @@ async def fetch_payment_resource(*, secret_key: str, payment_id: str) -> Optiona
 
 
 async def fetch_checkout_session_metadata(*, secret_key: str, checkout_session_id: str) -> Dict[str, Any]:
+    data = await fetch_checkout_session_data(secret_key=secret_key, checkout_session_id=checkout_session_id)
+    if not data:
+        return {}
+    attrs = data.get("attributes")
+    if not isinstance(attrs, dict):
+        return {}
+    m = attrs.get("metadata")
+    return dict(m) if isinstance(m, dict) else {}
+
+
+async def fetch_checkout_session_data(*, secret_key: str, checkout_session_id: str) -> Optional[Dict[str, Any]]:
+    """GET /v1/checkout_sessions/:id — returns the `data` object or None."""
     log = logging.getLogger(__name__)
     cid = (checkout_session_id or "").strip()
     if not cid:
-        return {}
+        return None
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             r = await client.get(
@@ -417,22 +429,90 @@ async def fetch_checkout_session_metadata(*, secret_key: str, checkout_session_i
             )
     except httpx.RequestError as exc:
         log.warning("PayMongo checkout_session GET failed: %s", exc)
-        return {}
+        return None
     if r.status_code != 200:
         log.warning("PayMongo checkout_session HTTP %s: %s", r.status_code, (r.text or "")[:400])
-        return {}
+        return None
     try:
         payload = r.json()
     except json.JSONDecodeError:
-        return {}
+        return None
     data = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(data, dict):
-        return {}
-    attrs = data.get("attributes")
+    return data if isinstance(data, dict) else None
+
+
+def _payment_tuple_from_checkout_payment_item(item: Any) -> Optional[Tuple[str, int, str]]:
+    """
+    PayMongo returns payments in two shapes:
+    - Webhook-style JSON:API: ``{\"data\": {\"id\": \"pay_...\", \"type\": \"payment\", \"attributes\": {...}}}``
+    - Retrieve checkout session (docs): ``{\"id\": \"pay_...\", \"type\": \"payment\", \"attributes\": {...}}``
+      (no ``data`` wrapper — see Checkout Session Resource on developers.paymongo.com).
+    """
+    if not isinstance(item, dict):
+        return None
+    po = item.get("data")
+    if not isinstance(po, dict):
+        if item.get("type") == "payment" and item.get("id"):
+            po = item
+        else:
+            return None
+    if po.get("type") != "payment":
+        return None
+    pid = str(po.get("id") or "")
+    pattrs = po.get("attributes")
+    if not isinstance(pattrs, dict):
+        pattrs = {}
+    st = str(pattrs.get("status") or "")
+    try:
+        amt = int(pattrs.get("amount") or 0)
+    except (TypeError, ValueError):
+        amt = 0
+    if not pid:
+        return None
+    return pid, amt, st
+
+
+def extract_paid_payment_from_checkout_session_data(
+    session_data: Dict[str, Any],
+) -> Optional[Tuple[str, int, str]]:
+    """
+    From GET /checkout_sessions/:id `data` object.
+    Returns (payment_id, amount_centavos, status) — prefers the first payment with status paid.
+    """
+    if session_data.get("type") != "checkout_session":
+        return None
+    attrs = session_data.get("attributes")
     if not isinstance(attrs, dict):
-        return {}
-    m = attrs.get("metadata")
-    return dict(m) if isinstance(m, dict) else {}
+        return None
+
+    raw: List[Any] = []
+    top = attrs.get("payments")
+    if isinstance(top, list):
+        raw.extend(top)
+    # Embedded Payment Intent also lists payments (same flat shape as docs).
+    pi = attrs.get("payment_intent")
+    if isinstance(pi, dict):
+        pi_attrs = pi.get("attributes")
+        if isinstance(pi_attrs, dict):
+            inner = pi_attrs.get("payments")
+            if isinstance(inner, list):
+                raw.extend(inner)
+
+    if not raw:
+        return None
+
+    paid_first: Optional[Tuple[str, int, str]] = None
+    any_first: Optional[Tuple[str, int, str]] = None
+    for p in raw:
+        t = _payment_tuple_from_checkout_payment_item(p)
+        if not t:
+            continue
+        if any_first is None:
+            any_first = t
+        if t[2].lower() == "paid":
+            paid_first = t
+            break
+    return paid_first or any_first
 
 
 async def fetch_payment_intent_metadata(*, secret_key: str, payment_intent_id: str) -> Dict[str, Any]:

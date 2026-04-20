@@ -196,8 +196,6 @@ export function PredictScreen(_props: Props): React.ReactElement {
           <Text style={styles.heroSub}>
             Pumili ng petsang mahalaga sa iyo—hindi na kailangang i-type ang buong format.
           </Text>
-          <RNText style={styles.swertresLegal}>{SWERTRES_LEGAL_CAPTION}</RNText>
-          <RNText style={styles.swertresLegalTl}>{SWERTRES_LEGAL_CAPTION_TL}</RNText>
         </View>
 
         <View style={styles.dateShell}>
@@ -340,7 +338,7 @@ export function PredictScreen(_props: Props): React.ReactElement {
           labelStyle={styles.ctaLabel}
           accessibilityLabel="Kunin ang LuckyPick numbers"
         >
-          Kunin ang aking pick
+          Press
         </Button>
         {!isoValid ? (
           <Text style={styles.warnText}>Pakikumpleto ang petsa bago magpatuloy.</Text>

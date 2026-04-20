@@ -1,4 +1,4 @@
-"""Payments: PayMongo (hosted checkout) or PayPal (Orders + capture) — chosen by PAYMENT_PROVIDER."""
+"""Payments: GCash hosted checkout (PayMongo rail) or PayPal — chosen by PAYMENT_PROVIDER."""
 from __future__ import annotations
 
 import json
@@ -31,7 +31,9 @@ from app.services.paymongo import (
     PayMongoClientError,
     create_checkout_session,
     enrich_metadata_for_swerte3_user,
+    extract_paid_payment_from_checkout_session_data,
     extract_payment_from_webhook,
+    fetch_checkout_session_data,
     parse_livemode_from_body,
     resolve_payment_method_types_for_checkout,
     verify_paymongo_signature,
@@ -41,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
-# Must match mobile `app.json` → expo.scheme (used after PayMongo checkout).
+# Must match mobile `app.json` → expo.scheme (used after GCash checkout).
 _APP_CHECKOUT_DEEP_LINK = "swerte3://checkout-done"
 
 _PESO_PER_TOKEN = 2
@@ -63,9 +65,10 @@ def _paypal_configured() -> bool:
 
 
 class PaymentConfigResponse(BaseModel):
-    checkout_provider: Literal["paymongo", "paypal"]
-    # URL the API uses for PayMongo success when the app does not override (matches openAuthSession redirect).
-    paymongo_auth_return_url: Optional[str] = None
+    """`gcash` = hosted GCash checkout (PayMongo API under the hood). `paypal` = PayPal Orders."""
+    checkout_provider: Literal["gcash", "paypal"]
+    # URL the API uses for GCash success when the app does not override (matches openAuthSession redirect).
+    gcash_checkout_return_url: Optional[str] = None
 
 
 def _client_return_url_allowed(url: str) -> bool:
@@ -77,7 +80,7 @@ def _client_return_url_allowed(url: str) -> bool:
 
 
 def _paymongo_checkout_return_urls(body: "CheckoutRequest") -> tuple[str, str]:
-    """Resolve success/cancel URLs for PayMongo (always non-empty)."""
+    """Resolve success/cancel URLs for GCash hosted checkout (always non-empty)."""
     settings = get_settings()
     rs = (body.return_success_url or "").strip()
     rc = (body.return_cancel_url or "").strip()
@@ -99,7 +102,8 @@ def payments_config():
         hint, _ = _paymongo_checkout_return_urls(
             CheckoutRequest(amount_pesos=CHECKOUT_MIN_AMOUNT_PESOS, provider="gcash")
         )
-    return PaymentConfigResponse(checkout_provider=prov, paymongo_auth_return_url=hint)
+    checkout = "paypal" if prov == "paypal" else "gcash"
+    return PaymentConfigResponse(checkout_provider=checkout, gcash_checkout_return_url=hint)
 
 
 class TokenTopupRequest(BaseModel):
@@ -117,7 +121,8 @@ class TokenTopupResponse(BaseModel):
 class CheckoutRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     amount_pesos: int = Field(..., ge=CHECKOUT_MIN_AMOUNT_PESOS)
-    provider: str = Field(default="gcash", pattern="^(gcash|maya|gotyme)$")
+    # GCash-only checkout (hosted page may still offer QR Ph per merchant capabilities).
+    provider: str = Field(default="gcash", pattern="^(gcash)$")
     # Mobile sends expo-linking URLs (exp://...) in Expo Go, or swerte3:// with dev/production builds.
     return_success_url: Optional[str] = Field(default=None, max_length=512)
     return_cancel_url: Optional[str] = Field(default=None, max_length=512)
@@ -131,6 +136,10 @@ class CheckoutResponse(BaseModel):
 
 class PaypalCaptureRequest(BaseModel):
     order_id: str = Field(..., min_length=6, max_length=64)
+
+
+class GcashCompleteRequest(BaseModel):
+    checkout_session_id: str = Field(..., min_length=6, max_length=128)
 
 
 class PaypalCaptureResponse(BaseModel):
@@ -329,7 +338,7 @@ async def paymongo_webhook(
     return {"received": True, "processed": True}
 
 
-# --- Checkout (PayMongo or PayPal) ---
+# --- Checkout (GCash or PayPal) ---
 
 
 @router.post("/checkout", response_model=CheckoutResponse)
@@ -353,7 +362,7 @@ async def _create_paymongo_checkout(
     if not sk:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="PayMongo is not configured (missing PAYMONGO_SECRET_KEY).",
+            detail="GCash checkout is not configured (missing PAYMONGO_SECRET_KEY on the server).",
         )
 
     amount_centavos = int(body.amount_pesos) * 100
@@ -363,7 +372,7 @@ async def _create_paymongo_checkout(
     methods = await resolve_payment_method_types_for_checkout(secret_key=sk, provider=body.provider)
     success_url, cancel_url = _paymongo_checkout_return_urls(body)
     logger.info(
-        "PayMongo checkout: user_id=%s amount_pesos=%s provider=%s methods=%s return=%s",
+        "GCash checkout: user_id=%s amount_pesos=%s provider=%s methods=%s return=%s",
         current_user.id,
         body.amount_pesos,
         body.provider,
@@ -387,23 +396,23 @@ async def _create_paymongo_checkout(
         if e.status_code == 0:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Cannot reach PayMongo (network). Try again.",
+                detail="Cannot reach payment service (network). Try again.",
             ) from e
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="PayMongo rejected checkout. Check server logs.",
+            detail="Payment service rejected checkout. Check server logs.",
         ) from e
 
     data = raw.get("data") if isinstance(raw, dict) else None
     if not isinstance(data, dict):
-        raise HTTPException(status_code=502, detail="Invalid PayMongo response")
+        raise HTTPException(status_code=502, detail="Invalid response from payment service")
     cs_id = str(data.get("id") or "")
     attrs = data.get("attributes")
     if not isinstance(attrs, dict):
-        raise HTTPException(status_code=502, detail="Invalid PayMongo response")
+        raise HTTPException(status_code=502, detail="Invalid response from payment service")
     checkout_url = str(attrs.get("checkout_url") or "")
     if not checkout_url or not cs_id:
-        raise HTTPException(status_code=502, detail="PayMongo did not return checkout_url")
+        raise HTTPException(status_code=502, detail="Payment service did not return a checkout URL")
 
     bind_row = db.get(PaymongoCheckoutBinding, cs_id)
     if bind_row:
@@ -598,6 +607,115 @@ async def paypal_capture_order(
 
     _grant_premium_credits(db, current_user.id, amount_centavos)
     _clear_paypal_binding(db, oid)
+
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    tokens_added = _tokens_added_for_centavos(amount_centavos)
+    return PaypalCaptureResponse(
+        premium_credits=int(user.premium_credits or 0),
+        tokens_added=tokens_added,
+        amount_pesos=amount_centavos // 100,
+    )
+
+
+@router.post("/gcash/complete", response_model=PaypalCaptureResponse)
+@router.post("/paymongo/complete", response_model=PaypalCaptureResponse, include_in_schema=False)
+async def gcash_complete_checkout(
+    body: GcashCompleteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Confirm a hosted GCash checkout after the user pays — same credits as the webhook, but works when
+    the webhook URL is unreachable (local dev) or delayed.
+    """
+    if _provider() != "paymongo":
+        raise HTTPException(
+            status_code=503,
+            detail="GCash checkout is only available when PAYMENT_PROVIDER=paymongo.",
+        )
+    sk = (get_settings().paymongo_secret_key or "").strip()
+    if not sk:
+        raise HTTPException(
+            status_code=503,
+            detail="GCash checkout is not configured (missing PAYMONGO_SECRET_KEY on the server).",
+        )
+
+    cs_id = body.checkout_session_id.strip()
+    session_data = await fetch_checkout_session_data(secret_key=sk, checkout_session_id=cs_id)
+    if not session_data:
+        raise HTTPException(status_code=502, detail="Could not load checkout session.")
+
+    pay_row = extract_paid_payment_from_checkout_session_data(session_data)
+    if not pay_row:
+        raise HTTPException(
+            status_code=409,
+            detail="No payment on this checkout yet. Finish payment in the browser, then try again.",
+        )
+    payment_id, amount_centavos, pay_status = pay_row
+    if pay_status.lower() != "paid":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Payment not completed yet (status: {pay_status}).",
+        )
+
+    binding = (
+        db.query(PaymongoCheckoutBinding)
+        .filter(
+            PaymongoCheckoutBinding.checkout_session_id == cs_id,
+            PaymongoCheckoutBinding.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    existing = db.query(PaymentEvent).filter(PaymentEvent.external_id == payment_id).first()
+    if existing:
+        if existing.user_id is not None and existing.user_id != current_user.id:
+            raise HTTPException(status_code=400, detail="Payment does not match this account.")
+        need_grant = existing.user_id is None
+        if need_grant:
+            existing.user_id = current_user.id
+            db.commit()
+            _grant_premium_credits(db, current_user.id, amount_centavos)
+        _clear_paymongo_checkout_binding(db, cs_id)
+        user = db.query(User).filter(User.id == current_user.id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        tokens_added = _tokens_added_for_centavos(amount_centavos) if need_grant else 0
+        return PaypalCaptureResponse(
+            premium_credits=int(user.premium_credits or 0),
+            tokens_added=tokens_added,
+            amount_pesos=amount_centavos // 100,
+        )
+
+    if not binding:
+        raise HTTPException(
+            status_code=404,
+            detail="No pending GCash checkout for this session and account. Pull to refresh if you already paid.",
+        )
+
+    if binding.amount_centavos != amount_centavos:
+        logger.warning(
+            "GCash complete: amount mismatch cs=%s binding_centavos=%s payment_centavos=%s",
+            cs_id,
+            binding.amount_centavos,
+            amount_centavos,
+        )
+
+    ev = PaymentEvent(
+        external_id=payment_id,
+        amount_centavos=amount_centavos,
+        status="paid",
+        user_id=current_user.id,
+        provider="paymongo",
+        raw_payload=None,
+    )
+    db.add(ev)
+    db.commit()
+
+    _grant_premium_credits(db, current_user.id, amount_centavos)
+    _clear_paymongo_checkout_binding(db, cs_id)
 
     user = db.query(User).filter(User.id == current_user.id).first()
     if not user:

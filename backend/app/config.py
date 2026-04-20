@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     )
 
     database_url: str = "postgresql://swerte3:swerte3@localhost:5432/swerte3"
+    # Cloud Run + Cloud SQL: use a small pool per instance so many scaled instances do not exhaust DB connections.
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+    # Recycle before Cloud SQL / network idle timeouts (seconds).
+    db_pool_recycle: int = 1800
     secret_key: str = "dev-secret-change-in-production"
     debug: bool = False
     # When DEBUG=true or OTP_TEST_MODE=true, use this exact 6-digit code instead of random (testing only).
@@ -55,7 +60,7 @@ class Settings(BaseSettings):
     semaphore_api_key: str = ""
     semaphore_sender_name: str = ""
 
-    # paymongo = PayMongo hosted checkout (good for PH testing). paypal = PayPal Orders + capture.
+    # paymongo = GCash hosted checkout (PayMongo API). paypal = PayPal Orders + capture.
     payment_provider: str = "paymongo"
 
     # PayPal (Orders v2). Get Client ID + Secret from developer.paypal.com → Apps & Credentials.

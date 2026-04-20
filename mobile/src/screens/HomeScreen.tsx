@@ -25,7 +25,8 @@ import { HOME_ENTERTAINMENT_CAPTION, HOME_ENTERTAINMENT_CAPTION_TL } from '../co
 import { logScreenView } from '../analytics';
 import {
   capturePaypalOrder,
-  createPaymongoCheckout,
+  completeGcashCheckout,
+  createGcashCheckout,
   createPaypalCheckout,
   fetchPaymentConfig,
   fetchUserMe,
@@ -45,13 +46,6 @@ const CHECKOUT_MIN_PESOS = 20;
 const PESOS_PER_TOKEN = 2;
 const MIN_CHECKOUT_TOKEN_EQUIVALENT = CHECKOUT_MIN_PESOS / PESOS_PER_TOKEN;
 
-type TopupProvider = 'gcash' | 'maya' | 'gotyme';
-const TOPUP_PROVIDER_LABEL: Record<TopupProvider, string> = {
-  gcash: 'GCash',
-  maya: 'Maya',
-  gotyme: 'Card',
-};
-
 const logoSource = require('../../assets/Logo.png');
 
 export function HomeScreen({ navigation }: Props): React.ReactElement {
@@ -61,10 +55,11 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
   const [topupVisible, setTopupVisible] = useState(false);
   const [amountPesos, setAmountPesos] = useState(String(CHECKOUT_MIN_PESOS));
   const [isBuying, setIsBuying] = useState(false);
-  const [checkoutProvider, setCheckoutProvider] = useState<'paymongo' | 'paypal' | null>(null);
-  const [selectedProvider, setSelectedProvider] = useState<TopupProvider>('gcash');
+  const [checkoutProvider, setCheckoutProvider] = useState<'gcash' | 'paypal' | null>(null);
   const [pendingPaypalOrderId, setPendingPaypalOrderId] = useState<string | null>(null);
   const [paypalCompleteBusy, setPaypalCompleteBusy] = useState(false);
+  const [pendingGcashSessionId, setPendingGcashSessionId] = useState<string | null>(null);
+  const [gcashCompleteBusy, setGcashCompleteBusy] = useState(false);
   const [profileComplete, setProfileComplete] = useState(false);
   const [profilePhone, setProfilePhone] = useState<string | null>(null);
   const [profileAlias, setProfileAlias] = useState<string | null>(null);
@@ -138,7 +133,7 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
       const c = await fetchPaymentConfig();
       setCheckoutProvider(c.checkout_provider);
     } catch {
-      setCheckoutProvider('paymongo');
+      setCheckoutProvider('gcash');
     }
   }, []);
 
@@ -178,6 +173,31 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
       Alert.alert('PayPal', err instanceof Error ? err.message : 'Could not complete payment.');
     } finally {
       setPaypalCompleteBusy(false);
+    }
+  };
+
+  const handleCompleteGcash = async () => {
+    if (!pendingGcashSessionId?.trim() || gcashCompleteBusy) return;
+    const token = await getStoredAccessToken();
+    if (!token?.trim()) {
+      Alert.alert('Session expired', 'Please log in again.');
+      return;
+    }
+    setGcashCompleteBusy(true);
+    try {
+      const r = await completeGcashCheckout(token, pendingGcashSessionId.trim());
+      setPremiumCredits(r.premium_credits);
+      setPendingGcashSessionId(null);
+      Alert.alert(
+        'Top-up complete',
+        r.tokens_added > 0
+          ? `Added ${r.tokens_added} token credit(s). Balance: ${r.premium_credits}.`
+          : `Payment was already applied. Balance: ${r.premium_credits}.`,
+      );
+    } catch (err) {
+      Alert.alert('Payment', err instanceof Error ? err.message : 'Could not confirm payment.');
+    } finally {
+      setGcashCompleteBusy(false);
     }
   };
 
@@ -246,24 +266,24 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
     try {
       setIsBuying(true);
       try {
-        const mode = checkoutProvider ?? 'paymongo';
+        const mode = checkoutProvider ?? 'gcash';
         let checkout: CheckoutSessionResult;
-        let paymongoAuthReturn: string | undefined;
+        let gcashAuthReturn: string | undefined;
         if (mode === 'paypal') {
           checkout = await createPaypalCheckout(token, wholePesos);
         } else {
-          paymongoAuthReturn = ExpoLinking.createURL('checkout-done');
+          gcashAuthReturn = ExpoLinking.createURL('checkout-done');
           try {
-            checkout = await createPaymongoCheckout(token, selectedProvider, wholePesos, {
-              returnSuccessUrl: paymongoAuthReturn,
-              returnCancelUrl: paymongoAuthReturn,
+            checkout = await createGcashCheckout(token, wholePesos, {
+              returnSuccessUrl: gcashAuthReturn,
+              returnCancelUrl: gcashAuthReturn,
             });
           } catch (firstErr) {
-            paymongoAuthReturn = 'swerte3://checkout-done';
+            gcashAuthReturn = 'swerte3://checkout-done';
             try {
-              checkout = await createPaymongoCheckout(token, selectedProvider, wholePesos, {
-                returnSuccessUrl: paymongoAuthReturn,
-                returnCancelUrl: paymongoAuthReturn,
+              checkout = await createGcashCheckout(token, wholePesos, {
+                returnSuccessUrl: gcashAuthReturn,
+                returnCancelUrl: gcashAuthReturn,
               });
             } catch {
               throw firstErr;
@@ -299,15 +319,28 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
           );
         } else {
           setPendingPaypalOrderId(null);
-          const returnForSession = paymongoAuthReturn ?? ExpoLinking.createURL('checkout-done');
+          setPendingGcashSessionId(checkout.checkout_session_id);
+          const returnForSession = gcashAuthReturn ?? ExpoLinking.createURL('checkout-done');
           try {
-            const auth = await WebBrowser.openAuthSessionAsync(checkout.checkout_url, returnForSession);
-            void refreshWallet();
-            if (auth.type === 'success') {
-              Alert.alert(
-                'Balik sa app',
-                'Kung hindi pa tumataas ang tokens, maghintay ng ilang segundo (webhook) o i-pull down para mag-refresh.',
-              );
+            await WebBrowser.openAuthSessionAsync(checkout.checkout_url, returnForSession);
+            const tokenAfter = await getStoredAccessToken();
+            if (tokenAfter?.trim()) {
+              setGcashCompleteBusy(true);
+              try {
+                const r = await completeGcashCheckout(tokenAfter, checkout.checkout_session_id);
+                setPremiumCredits(r.premium_credits);
+                setPendingGcashSessionId(null);
+                Alert.alert(
+                  'Top-up complete',
+                  r.tokens_added > 0
+                    ? `Added ${r.tokens_added} token credit(s). Balance: ${r.premium_credits}.`
+                    : `Payment was already applied. Balance: ${r.premium_credits}.`,
+                );
+              } catch {
+                void refreshWallet();
+              } finally {
+                setGcashCompleteBusy(false);
+              }
             }
           } catch {
             const canOpen = await Linking.canOpenURL(checkout.checkout_url);
@@ -317,8 +350,8 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
             }
             await Linking.openURL(checkout.checkout_url);
             Alert.alert(
-              'PayMongo',
-              'Nagbukas ang browser. Pagkatapos magbayad, pumunta nang manual sa app; ang credits ay dumarating sa webhook.',
+              'GCash / payment',
+              'Nagbukas ang browser. Pagkatapos magbayad sa GCash o ibang paraan, bumalik sa app at i-tap ang “Confirm payment” kung hindi pa tumataas ang tokens.',
             );
           }
         }
@@ -482,6 +515,34 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
           </Card>
         ) : null}
 
+        {checkoutProvider === 'gcash' && pendingGcashSessionId ? (
+          <Card style={[styles.card, styles.paypalPendingCard]} mode="elevated" accessibilityLabel="GCash payment pending">
+            <Card.Content>
+              <Title style={styles.paypalPendingTitle}>GCash payment pending</Title>
+              <Text style={styles.paypalPendingText}>
+                After paying with GCash in the browser, tap below to confirm and add tokens. If the payment is still
+                processing, wait a few seconds and try again.
+              </Text>
+              <View style={styles.paypalPendingActions}>
+                <Button
+                  mode="contained"
+                  onPress={() => void handleCompleteGcash()}
+                  loading={gcashCompleteBusy}
+                  disabled={gcashCompleteBusy}
+                  buttonColor="#0f6b3f"
+                  textColor="#ffffff"
+                  style={styles.paypalCompleteBtn}
+                >
+                  Confirm GCash payment
+                </Button>
+                <Button mode="text" onPress={() => setPendingGcashSessionId(null)} textColor="#4a5568">
+                  Dismiss
+                </Button>
+              </View>
+            </Card.Content>
+          </Card>
+        ) : null}
+
         <Card
           style={[styles.card, styles.cardAccent]}
           mode="outlined"
@@ -609,6 +670,21 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
           </View>
         ) : null}
 
+        <View style={styles.replayIntroRow}>
+          <Pressable
+            onPress={() =>
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'VideoHome' }],
+              })
+            }
+            accessibilityLabel="Replay intro video"
+            accessibilityRole="button"
+          >
+            <RNText style={styles.replayIntroLink}>Replay intro video</RNText>
+          </Pressable>
+        </View>
+
         <View
           style={styles.homeFooterDisclaimer}
           accessibilityRole="text"
@@ -671,31 +747,13 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
               {CHECKOUT_MIN_PESOS} ÷ {PESOS_PER_TOKEN}).
               {checkoutProvider === 'paypal'
                 ? ' You pay with PayPal.'
-                : ' PayMongo hosted checkout (GCash / Maya / card / QR when enabled on your merchant).'}
+                : ' You pay with GCash — a secure browser page opens to complete payment.'}
             </RNText>
             <RNText style={styles.topupNote}>
               {checkoutProvider === 'paypal'
                 ? 'After PayPal, tap “Complete PayPal payment” on Home.'
-                : 'Credits update after payment via server webhook; return to Home to refresh balance.'}
+                : 'Credits update after GCash payment (webhook or confirm on Home).'}
             </RNText>
-            {checkoutProvider !== 'paypal' ? (
-              <View style={styles.providerRow}>
-                {(['gcash', 'maya', 'gotyme'] as const satisfies readonly TopupProvider[]).map((provider) => {
-                  const selected = provider === selectedProvider;
-                  return (
-                    <Pressable
-                      key={provider}
-                      onPress={() => setSelectedProvider(provider)}
-                      style={[styles.providerChip, selected && styles.providerChipSelected]}
-                    >
-                      <RNText style={[styles.providerChipText, selected && styles.providerChipTextSelected]}>
-                        {TOPUP_PROVIDER_LABEL[provider]}
-                      </RNText>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : null}
             <RNText style={styles.inputLabel}>Amount (PHP)</RNText>
             <TextInput
               value={amountPesos}
@@ -939,6 +997,13 @@ const styles = StyleSheet.create({
     }),
   },
   editProfileRow: { alignItems: 'center', marginTop: 8, marginBottom: 8 },
+  replayIntroRow: { alignItems: 'center', marginBottom: 10 },
+  replayIntroLink: {
+    fontSize: 14,
+    color: '#276749',
+    textDecorationLine: 'underline',
+    fontWeight: '600',
+  },
   editProfileBtn: { borderColor: '#6aa174', borderRadius: 12 },
   luckyPickStripe: {
     height: 5,
@@ -1311,21 +1376,6 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     fontWeight: '600',
   },
-  providerRow: { flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' },
-  providerChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#8aa29a',
-    backgroundColor: '#eef6ef',
-  },
-  providerChipSelected: {
-    borderColor: '#1f7a4d',
-    backgroundColor: '#d9f6e4',
-  },
-  providerChipText: { color: '#365646', fontWeight: '700', fontSize: 12 },
-  providerChipTextSelected: { color: '#13472e' },
   inputLabel: { marginTop: 14, marginBottom: 6, color: '#214a33', fontWeight: '700' },
   amountInput: {
     borderWidth: 1,

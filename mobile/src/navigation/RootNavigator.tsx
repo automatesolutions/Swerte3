@@ -41,8 +41,17 @@ const screenOptions = {
 };
 
 /**
- * Welcome (video) is always the first screen on a cold start. Continue/Skip then goes to
- * Profile (if needed) or Home — see VideoHomeScreen.continueAfterWelcome.
+ * Welcome (VideoHome) is the `initialRouteName` whenever the navigator mounts after a **cold start**
+ * (app process was not running — e.g. first open after install, or after force-stop).
+ *
+ * **Warm resume:** If the user left the app (Home button) and taps the app icon again, Android/iOS
+ * typically **bring the existing activity forward** and keep the navigation stack. You stay on
+ * Home (or whatever screen was last shown); Welcome does not re-run. That is standard OS behavior.
+ *
+ * To see the intro again without killing the app: use **Replay intro video** on Home. To test a full
+ * cold start: force-stop the app in system Settings, then open from the launcher.
+ *
+ * Continue/Skip on Welcome → Profile (if needed) or Home — see VideoHomeScreen.continueAfterWelcome.
  */
 export function RootNavigator(): React.ReactElement {
   return (

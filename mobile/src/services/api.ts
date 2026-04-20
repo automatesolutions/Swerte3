@@ -372,22 +372,21 @@ export type CheckoutSessionResult = {
 };
 
 export type PaymentConfig = {
-  checkout_provider: 'paymongo' | 'paypal';
-  paymongo_auth_return_url?: string | null;
+  checkout_provider: 'gcash' | 'paypal';
+  gcash_checkout_return_url?: string | null;
 };
 
 export function fetchPaymentConfig(): Promise<PaymentConfig> {
   return getJson<PaymentConfig>('/api/payments/config');
 }
 
-/** PayMongo hosted checkout — credits via webhook; use expo-web-browser + return URLs in the app. */
-export function createPaymongoCheckout(
+/** GCash hosted checkout — credits apply via webhook and/or `completeGcashCheckout`. */
+export function createGcashCheckout(
   token: string,
-  provider: WalletProvider,
   amountPesos: number,
   opts?: { returnSuccessUrl?: string; returnCancelUrl?: string },
 ): Promise<CheckoutSessionResult> {
-  const body: Record<string, string | number> = { provider, amount_pesos: amountPesos };
+  const body: Record<string, string | number> = { provider: 'gcash', amount_pesos: amountPesos };
   if (opts?.returnSuccessUrl) body.return_success_url = opts.returnSuccessUrl;
   if (opts?.returnCancelUrl) body.return_cancel_url = opts.returnCancelUrl;
   return postJson<CheckoutSessionResult>('/api/payments/checkout', body, { token });
@@ -408,6 +407,15 @@ export function capturePaypalOrder(token: string, orderId: string): Promise<Payp
   return postJson<PaypalCaptureResult>(
     '/api/payments/paypal/capture',
     { order_id: orderId },
+    { token },
+  );
+}
+
+/** After GCash checkout — confirms payment with the API (works when webhooks are delayed or unreachable). */
+export function completeGcashCheckout(token: string, checkoutSessionId: string): Promise<PaypalCaptureResult> {
+  return postJson<PaypalCaptureResult>(
+    '/api/payments/gcash/complete',
+    { checkout_session_id: checkoutSessionId },
     { token },
   );
 }

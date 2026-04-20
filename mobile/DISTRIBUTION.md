@@ -13,7 +13,7 @@ Building an APK is only **half** of what makes Swerte3 work for testers.
 | Piece | What it is | What **you** must do |
 |--------|------------|----------------------|
 | **Mobile (APK)** | The screen in your friend’s hand | Build with EAS; set **`EXPO_PUBLIC_API_URL`** on Expo so the APK knows **where** to send requests. |
-| **Backend (API)** | Login, database, PayMongo, everything “smart” | **Run it** (e.g. `uvicorn` on your PC) **and** expose it on the internet (e.g. **ngrok**) **or** deploy it (e.g. Google Cloud). Load **`backend/.env`** (or cloud secrets) **on that server** — same as when *you* test. |
+| **Backend (API)** | Login, database, GCash payments (server keys), everything “smart” | **Run it** (e.g. `uvicorn` on your PC) **and** expose it on the internet (e.g. **ngrok**) **or** deploy it (e.g. Google Cloud). Load **`backend/.env`** (or cloud secrets) **on that server** — same as when *you* test. |
 
 **Expo environment variables do not start your API.** They only tell the **mobile app** which **public URL** to call. If the backend is off, or ngrok is off, or the URL is wrong, the APK will open but **sign-in / payments / data will fail** — because there is nothing answering at that address.
 
@@ -37,7 +37,7 @@ The **APK does not include your backend** and does **not** include `backend/.env
 
 - The mobile app reads **`EXPO_PUBLIC_API_URL`** (see `mobile/.env.example`). That value is **inlined into the JavaScript bundle at build time** when EAS runs Metro.
 - After install, the app **always** calls whatever URL was baked into **that** build. It does **not** read your laptop’s `mobile/.env` on each launch.
-- **PayMongo / PayPal / DB / JWT secrets** belong in **`backend/.env`** (or cloud secrets on the server). They are **server-side only** and are **not** inside the APK.
+- **GCash checkout keys (PayMongo API) / PayPal / DB / JWT secrets** belong in **`backend/.env`** (or cloud secrets on the server). They are **server-side only** and are **not** inside the APK.
 
 **Implication for friends:** Their phones must be able to open **`EXPO_PUBLIC_API_URL`** on the internet. `http://127.0.0.1:8000`, `http://10.0.2.2:8000`, or a random LAN IP usually **will not work** for someone outside your Wi‑Fi.
 
@@ -274,4 +274,4 @@ Official overview: [Expo iOS build](https://docs.expo.dev/build/setup/), [TestFl
 
 **iPhone:** Apple Developer Program → `eas build --platform ios --profile preview` (and submit to TestFlight) → friends install via **TestFlight** (§14) → same API URL env as Android.
 
-For payments/webhooks, see **`backend/.env.example`** and PayMongo (webhook URL must match your **public** API host).
+For GCash payments/webhooks, see **`backend/.env.example`** — webhook URL must match your **public** API host.

@@ -1,16 +1,71 @@
-# Google Cloud Build → Cloud Run (adjust project_id, region, service name)
+# Cloud Build → Container Registry (gcr.io) → Cloud Run.
+# Region: asia-southeast1 is a good default for Philippines / Southeast Asia latency.
+#
+# First-time (project):
+#   gcloud services enable run.googleapis.com sqladmin.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com
+#   gcloud services enable containerregistry.googleapis.com
+#
+# Cloud SQL: create a PostgreSQL instance, DB, and user. Store the connection string in Secret Manager
+# (recommended) or set env vars on the Cloud Run service after deploy.
+#
+# Cloud Run ↔ Cloud SQL: grant the Cloud Run runtime service account `roles/cloudsql.client`.
+#
+# Build (from backend/):
+#   gcloud builds submit --config=cloudbuild.yaml --substitutions=COMMIT_SHA=$(git rev-parse HEAD)
+#
+substitutions:
+  _REGION: asia-southeast1
+  _SERVICE_NAME: swerte3-api
+  # project:region:instance — leave empty if you connect without the Cloud SQL socket (not recommended for prod).
+  _CLOUD_SQL_INSTANCE: ""
+  # 0 = scale to zero; 1 = fewer cold starts (billing applies).
+  _MIN_INSTANCES: "0"
+  # pandas/xgboost/sklearn need more than 512Mi at import + DB connect on startup
+  _MEMORY: 2Gi
+  _CPU: "1"
+
 steps:
   - name: gcr.io/cloud-builders/docker
-    args: ["build", "-t", "gcr.io/$PROJECT_ID/swerte3-api:$COMMIT_SHA", "."]
-  - name: gcr.io/cloud-builders/docker
-    args: ["push", "gcr.io/$PROJECT_ID/swerte3-api:$COMMIT_SHA"]
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
     args:
-      - run
-      - deploy
-      - swerte3-api
-      - --image=gcr.io/$PROJECT_ID/swerte3-api:$COMMIT_SHA
-      - --region=asia-southeast1
-      - --platform=managed
-      - --allow-unauthenticated
+      - build
+      - -t
+      - gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        # Use RUN_IMAGE variable name (avoid naming shell vars like built-in Cloud Build substitution keys).
+        RUN_IMAGE="gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA"
+        EXTRA=()
+        if [ -n "${_CLOUD_SQL_INSTANCE}" ]; then
+          EXTRA+=(--add-cloudsql-instances="${_CLOUD_SQL_INSTANCE}")
+        fi
+        # Requires Secret Manager secret `database-url` (full postgresql://... URL). See scripts/gcp-first-deploy.ps1
+        EXTRA+=(--set-secrets=DATABASE_URL=database-url:latest)
+        gcloud run deploy "${_SERVICE_NAME}" \
+          --image="$$RUN_IMAGE" \
+          --region="${_REGION}" \
+          --platform=managed \
+          --allow-unauthenticated \
+          --cpu="${_CPU}" \
+          --memory="${_MEMORY}" \
+          --min-instances="${_MIN_INSTANCES}" \
+          --max-instances=20 \
+          --concurrency=80 \
+          --timeout=300 \
+          --cpu-boost \
+          "${EXTRA[@]}"
+
+images:
+  - gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA
+
+options:
+  logging: CLOUD_LOGGING_ONLY
