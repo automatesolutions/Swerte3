@@ -8,7 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import Base, engine, ensure_users_table_schema
-from app.routers import analytics, auth, health, ingest, math_cognitive, payments, picture_analysis, predict
+from app.routers import (
+    analytics,
+    auth,
+    elite_profile,
+    health,
+    ingest,
+    math_cognitive,
+    payments,
+    picture_analysis,
+    predict,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,6 +38,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(predict.router, prefix="/api")
+app.include_router(elite_profile.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(payments.router, prefix="/api")
 app.include_router(ingest.router, prefix="/api")

@@ -215,9 +215,53 @@ export type PremiumStartResult = {
   charged: boolean;
 };
 
-/** GINTO: always spends 1 token; then 9AM/4PM/9PM premium GETs do not deduct until next GINTO. */
+/** GINTO: opens Elite batch (no token charge); profiling gate runs on client first. */
 export function startPremiumBatch(token: string): Promise<PremiumStartResult> {
   return postJson<PremiumStartResult>('/api/predict/premium/start', {}, { token });
+}
+
+export type EliteProfileOption = {
+  value: string;
+  label_en: string;
+  label_tl: string;
+};
+
+export type EliteProfileQuestion = {
+  id: string;
+  prompt_en:  string;
+  prompt_tl: string;
+  kind: 'select' | 'text';
+  repeatable?: boolean;
+  placeholder_en?: string;
+  placeholder_tl?: string;
+  options?: EliteProfileOption[];
+};
+
+export type EliteProfileProgress = {
+  primary_answered: number;
+  primary_total: number;
+  total_answered: number;
+};
+
+export type EliteProfileNextResult = {
+  question: EliteProfileQuestion | null;
+  progress: EliteProfileProgress;
+};
+
+export function fetchEliteProfileNext(token: string): Promise<EliteProfileNextResult> {
+  return getJson<EliteProfileNextResult>('/api/elite/profile/next', { token });
+}
+
+export function submitEliteProfileAnswer(
+  token: string,
+  questionId: string,
+  answer: string,
+): Promise<{ ok: boolean; progress: EliteProfileProgress }> {
+  return postJson<{ ok: boolean; progress: EliteProfileProgress }>(
+    '/api/elite/profile/answer',
+    { question_id: questionId, answer },
+    { token },
+  );
 }
 
 export function fetchDailyPredictions(targetDate: string, variationKey?: string): Promise<DailyPredictionResponse> {

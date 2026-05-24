@@ -4,18 +4,13 @@ import {
   Alert,
   AppState,
   Image,
-  Linking,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text as RNText,
-  TextInput,
   View,
 } from 'react-native';
-import * as ExpoLinking from 'expo-linking';
-import * as WebBrowser from 'expo-web-browser';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Button, Card, Text, Title } from 'react-native-paper';
 import { useFocusEffect } from '@react-navigation/native';
@@ -26,35 +21,20 @@ import { logScreenView } from '../analytics';
 import {
   capturePaypalOrder,
   completeGcashCheckout,
-  createGcashCheckout,
-  createPaypalCheckout,
   fetchPaymentConfig,
   fetchUserMe,
-  purchaseTokens,
   registerGuestSession,
-  startPremiumBatch,
   userNeedsProfile,
-  type CheckoutSessionResult,
 } from '../services/api';
 import type { RootStackParamList } from '../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
-/** Minimum top-up amount (matches backend / PayPal order). */
-const CHECKOUT_MIN_PESOS = 20;
-/** Same rate as backend: premium credits scale with whole pesos at this ratio. */
-const PESOS_PER_TOKEN = 2;
-const MIN_CHECKOUT_TOKEN_EQUIVALENT = CHECKOUT_MIN_PESOS / PESOS_PER_TOKEN;
-
 const logoSource = require('../../assets/Logo.png');
 
 export function HomeScreen({ navigation }: Props): React.ReactElement {
   const [premiumCredits, setPremiumCredits] = useState<number | null>(null);
-  const [noTokenModalVisible, setNoTokenModalVisible] = useState(false);
   const [gintoBusy, setGintoBusy] = useState(false);
-  const [topupVisible, setTopupVisible] = useState(false);
-  const [amountPesos, setAmountPesos] = useState(String(CHECKOUT_MIN_PESOS));
-  const [isBuying, setIsBuying] = useState(false);
   const [checkoutProvider, setCheckoutProvider] = useState<'gcash' | 'paypal' | null>(null);
   const [pendingPaypalOrderId, setPendingPaypalOrderId] = useState<string | null>(null);
   const [paypalCompleteBusy, setPaypalCompleteBusy] = useState(false);
@@ -210,166 +190,9 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
     }
     setGintoBusy(true);
     try {
-      let credits: number;
-      try {
-        const me = await fetchUserMe(token);
-        credits = Math.max(0, Math.floor(Number(me.premium_credits)));
-        setPremiumCredits(credits);
-      } catch {
-        Alert.alert('Error', 'Hindi ma-load ang balanse. Subukan muli.');
-        return;
-      }
-      if (credits < 1) {
-        setNoTokenModalVisible(true);
-        return;
-      }
-      const r = await startPremiumBatch(token);
-      setPremiumCredits(r.premium_credits);
-      navigation.navigate('LihimPremium');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('402') || msg.toLowerCase().includes('payment') || msg.toLowerCase().includes('kailangan')) {
-        setNoTokenModalVisible(true);
-      } else {
-        Alert.alert('Elite', msg || 'Hindi makapagbukas ng Elite.');
-      }
+      navigation.navigate('EliteProfileGate');
     } finally {
       setGintoBusy(false);
-    }
-  };
-
-  const openAddTokensFromNoTokenModal = () => {
-    setNoTokenModalVisible(false);
-    setTopupVisible(true);
-  };
-
-  const handleConfirmTopup = async () => {
-    const parsed = Number(amountPesos.trim());
-    if (!Number.isFinite(parsed) || parsed < CHECKOUT_MIN_PESOS) {
-      Alert.alert(
-        'Invalid amount',
-        `Minimum top-up is ${CHECKOUT_MIN_PESOS} PHP. At ${PESOS_PER_TOKEN} PHP per token, that is ${MIN_CHECKOUT_TOKEN_EQUIVALENT} tokens.`,
-      );
-      return;
-    }
-    const wholePesos = Math.floor(parsed);
-    const tokensToAdd = Math.floor(wholePesos / PESOS_PER_TOKEN);
-    if (tokensToAdd < 1) {
-      Alert.alert('Invalid amount', `Every ${PESOS_PER_TOKEN} pesos adds 1 token.`);
-      return;
-    }
-    const token = await getStoredAccessToken();
-    if (!token?.trim()) {
-      Alert.alert('Session expired', 'Please log in again.');
-      return;
-    }
-    try {
-      setIsBuying(true);
-      try {
-        const mode = checkoutProvider ?? 'gcash';
-        let checkout: CheckoutSessionResult;
-        let gcashAuthReturn: string | undefined;
-        if (mode === 'paypal') {
-          checkout = await createPaypalCheckout(token, wholePesos);
-        } else {
-          gcashAuthReturn = ExpoLinking.createURL('checkout-done');
-          try {
-            checkout = await createGcashCheckout(token, wholePesos, {
-              returnSuccessUrl: gcashAuthReturn,
-              returnCancelUrl: gcashAuthReturn,
-            });
-          } catch (firstErr) {
-            gcashAuthReturn = 'swerte3://checkout-done';
-            try {
-              checkout = await createGcashCheckout(token, wholePesos, {
-                returnSuccessUrl: gcashAuthReturn,
-                returnCancelUrl: gcashAuthReturn,
-              });
-            } catch {
-              throw firstErr;
-            }
-          }
-        }
-        if (checkout.amount_pesos < CHECKOUT_MIN_PESOS) {
-          Alert.alert(
-            'Backend is outdated',
-            `The server opened a ${checkout.amount_pesos} PHP checkout. Minimum is ${CHECKOUT_MIN_PESOS} PHP. Redeploy the API.`,
-          );
-          return;
-        }
-        if (checkout.amount_pesos !== wholePesos) {
-          Alert.alert(
-            'Amount mismatch',
-            `You asked for ${wholePesos} PHP but the server returned ${checkout.amount_pesos} PHP. Do not pay on that page; fix the API.`,
-          );
-          return;
-        }
-        setTopupVisible(false);
-        if (mode === 'paypal') {
-          const canOpen = await Linking.canOpenURL(checkout.checkout_url);
-          if (!canOpen) {
-            Alert.alert('Checkout', 'Cannot open payment page on this device.');
-            return;
-          }
-          await Linking.openURL(checkout.checkout_url);
-          setPendingPaypalOrderId(checkout.checkout_session_id);
-          Alert.alert(
-            'PayPal',
-            'After you approve payment in PayPal, return to this app and tap “Complete PayPal payment” on Home to add tokens.',
-          );
-        } else {
-          setPendingPaypalOrderId(null);
-          setPendingGcashSessionId(checkout.checkout_session_id);
-          const returnForSession = gcashAuthReturn ?? ExpoLinking.createURL('checkout-done');
-          try {
-            await WebBrowser.openAuthSessionAsync(checkout.checkout_url, returnForSession);
-            const tokenAfter = await getStoredAccessToken();
-            if (tokenAfter?.trim()) {
-              setGcashCompleteBusy(true);
-              try {
-                const r = await completeGcashCheckout(tokenAfter, checkout.checkout_session_id);
-                setPremiumCredits(r.premium_credits);
-                setPendingGcashSessionId(null);
-                Alert.alert(
-                  'Top-up complete',
-                  r.tokens_added > 0
-                    ? `Added ${r.tokens_added} token credit(s). Balance: ${r.premium_credits}.`
-                    : `Payment was already applied. Balance: ${r.premium_credits}.`,
-                );
-              } catch {
-                void refreshWallet();
-              } finally {
-                setGcashCompleteBusy(false);
-              }
-            }
-          } catch {
-            const canOpen = await Linking.canOpenURL(checkout.checkout_url);
-            if (!canOpen) {
-              Alert.alert('Checkout', 'Cannot open payment page on this device.');
-              return;
-            }
-            await Linking.openURL(checkout.checkout_url);
-            Alert.alert(
-              'GCash / payment',
-              'Nagbukas ang browser. Pagkatapos magbayad sa GCash o ibang paraan, bumalik sa app at i-tap ang “Confirm payment” kung hindi pa tumataas ang tokens.',
-            );
-          }
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : '';
-        if (msg.includes('410') || msg.toLowerCase().includes('gone')) {
-          const result = await purchaseTokens(token, 'gcash', wholePesos);
-          setPremiumCredits(result.premium_credits);
-          setTopupVisible(false);
-          Alert.alert('Top-up successful', `Added ${result.tokens_added} token(s). (dev mode)`);
-        } else {
-          throw e;
-        }
-      }
-    } catch (err) {
-      Alert.alert('Top-up failed', err instanceof Error ? err.message : 'Please try again.');
-    } finally {
-      setIsBuying(false);
     }
   };
 
@@ -562,8 +385,8 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
             </View>
             <Text style={styles.explainTextElite}>
               Elite blends several AI agents into one premium number set. Tap the gold{' '}
-              <Text style={styles.explainTextEliteEm}>GINTO</Text> button below to check your Elite prediction
-              numbers for 9AM, 4PM, and 9PM.
+              <Text style={styles.explainTextEliteEm}>GINTO</Text> button — sagutin ang isang mabilis na tanong,
+              then check Elite predictions for 9AM, 4PM, and 9PM.
             </Text>
             <View style={styles.lihimActionsRow}>
               <Button
@@ -579,32 +402,6 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
               >
                 ✦ GINTO ✦
               </Button>
-              <Pressable
-                onPress={() => setTopupVisible(true)}
-                accessibilityLabel="Add tokens"
-                style={({ pressed }) => [styles.addTokensBtn, pressed && styles.addTokensBtnPressed]}
-              >
-                <RNText style={styles.addTokensBtnText}>Add Tokens</RNText>
-              </Pressable>
-              <View
-                style={styles.tokenRingWrap}
-                accessibilityLabel={
-                  premiumCredits === null ? 'Premium credits unknown' : `Premium credits ${premiumCredits}`
-                }
-              >
-                <LinearGradient
-                  colors={['#c9a227', '#f4e4a6', '#b8860b']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.tokenRing}
-                >
-                  <View style={styles.tokenCircleInner}>
-                    <RNText style={styles.tokenCircleText}>
-                      {premiumCredits === null ? '—' : String(premiumCredits)}
-                    </RNText>
-                  </View>
-                </LinearGradient>
-              </View>
             </View>
           </Card.Content>
         </Card>
@@ -695,97 +492,6 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
         </View>
         </View>
       </View>
-      <Modal
-        visible={noTokenModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setNoTokenModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <RNText style={styles.noTokenTitle}>Walang token</RNText>
-            <RNText style={styles.noTokenLead}>
-              Kailangan ng token para mabuksan ang Elite.
-            </RNText>
-            <RNText style={styles.noTokenBody}>
-              Premium ang Elite (MiroFish): maraming matalinong AI ang tumatakbo, kaya may konting bayad sa
-              server.
-            </RNText>
-            <RNText style={styles.noTokenPrice}>
-              1 token = {PESOS_PER_TOKEN} pesos — smallest top-up {CHECKOUT_MIN_PESOS} pesos ({MIN_CHECKOUT_TOKEN_EQUIVALENT}{' '}
-              tokens)
-            </RNText>
-            <RNText style={styles.noTokenAction}>Pindutin ang Add Tokens sa ibaba para magpatuloy.</RNText>
-            <View style={styles.modalActions}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalBtnGhost]}
-                onPress={() => setNoTokenModalVisible(false)}
-              >
-                <RNText style={styles.modalBtnGhostText}>Sara</RNText>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={openAddTokensFromNoTokenModal}>
-                <RNText style={styles.modalBtnPrimaryText}>Add Tokens</RNText>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      <Modal
-        visible={topupVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setTopupVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <RNText style={styles.modalTitle}>Add Tokens</RNText>
-            <RNText style={styles.topupLead}>
-              <RNText style={styles.topupLeadEm}>
-                {PESOS_PER_TOKEN} PHP = 1 token.
-              </RNText>{' '}
-              Minimum {CHECKOUT_MIN_PESOS} PHP — smallest purchase is {MIN_CHECKOUT_TOKEN_EQUIVALENT} tokens (
-              {CHECKOUT_MIN_PESOS} ÷ {PESOS_PER_TOKEN}).
-              {checkoutProvider === 'paypal'
-                ? ' You pay with PayPal.'
-                : ' You pay with GCash — a secure browser page opens to complete payment.'}
-            </RNText>
-            <RNText style={styles.topupNote}>
-              {checkoutProvider === 'paypal'
-                ? 'After PayPal, tap “Complete PayPal payment” on Home.'
-                : 'Credits update after GCash payment (webhook or confirm on Home).'}
-            </RNText>
-            <RNText style={styles.inputLabel}>Amount (PHP)</RNText>
-            <TextInput
-              value={amountPesos}
-              onChangeText={setAmountPesos}
-              keyboardType="number-pad"
-              placeholder={`e.g. ${CHECKOUT_MIN_PESOS}`}
-              placeholderTextColor="#6b7280"
-              style={styles.amountInput}
-              editable={!isBuying}
-            />
-            <RNText style={styles.previewText}>
-              Tokens to add: {Math.max(0, Math.floor((Number(amountPesos) || 0) / PESOS_PER_TOKEN))}
-            </RNText>
-            <View style={styles.modalActions}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalBtnGhost]}
-                onPress={() => setTopupVisible(false)}
-                disabled={isBuying}
-              >
-                <RNText style={styles.modalBtnGhostText}>Cancel</RNText>
-              </Pressable>
-              <Pressable
-                style={[styles.modalBtn, styles.modalBtnPrimary, isBuying && styles.modalBtnDisabled]}
-                onPress={handleConfirmTopup}
-                disabled={isBuying}
-              >
-                <RNText style={styles.modalBtnPrimaryText}>{isBuying ? 'Processing...' : 'Confirm'}</RNText>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </ScrollView>
   );
 }

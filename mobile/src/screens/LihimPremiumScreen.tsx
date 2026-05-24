@@ -74,10 +74,16 @@ export function LihimPremiumScreen({ navigation }: Props): React.ReactElement {
       setData(res);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Request failed';
-      if (msg.includes('402') || msg.toLowerCase().includes('payment')) {
+      if (msg.includes('403') || msg.toLowerCase().includes('ginto')) {
         Alert.alert(
-          'Kailangan mag-GINTO',
-          'Mag-GINTO sa Home muna (1 token bawat pindot — LLM/compute cost). Pagkatapos, puwede ang 9AM, 4PM, at 9PM nang walang dagdag-bawas.',
+          'Elite',
+          'Mag-GINTO muna sa Home at sagutin ang profiling tanong bago kunin ang hula.',
+          [{ text: 'OK', onPress: () => navigation.navigate('Home') }],
+        );
+      } else if (msg.includes('402') || msg.toLowerCase().includes('payment')) {
+        Alert.alert(
+          'Elite',
+          'Hindi available ang Elite ngayon. Bumalik sa Home at subukan muli.',
           [{ text: 'OK', onPress: () => navigation.navigate('Home') }],
         );
       } else {

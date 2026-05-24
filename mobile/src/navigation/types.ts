@@ -10,6 +10,7 @@ export type RootStackParamList = {
     prefetchedMe?: UserMe;
   };
   LihimPremium: undefined;
+  EliteProfileGate: undefined;
   Predict: undefined;
   VideoHome: undefined;
   Paywall: undefined;

@@ -6,6 +6,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { HomeScreen } from '../screens/HomeScreen';
 import { ProfileSetupScreen } from '../screens/ProfileSetupScreen';
+import { EliteProfileGateScreen } from '../screens/EliteProfileGateScreen';
 import { LihimPremiumScreen } from '../screens/LihimPremiumScreen';
 import { PredictScreen } from '../screens/PredictScreen';
 import { VideoHomeScreen } from '../screens/VideoHomeScreen';
@@ -68,6 +69,16 @@ export function RootNavigator(): React.ReactElement {
           options={{ title: 'Profile' }}
         />
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Swerte3' }} />
+        <Stack.Screen
+          name="EliteProfileGate"
+          component={EliteProfileGateScreen}
+          options={{
+            title: 'Elite profile',
+            headerStyle: { backgroundColor: '#1a0f08' },
+            headerTintColor: '#f7e7b0',
+            headerShadowVisible: false,
+          }}
+        />
         <Stack.Screen
           name="LihimPremium"
           component={LihimPremiumScreen}
