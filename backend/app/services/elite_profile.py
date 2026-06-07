@@ -1,116 +1,112 @@
-"""Pick the next progressive profiling question for an Elite visit."""
+"""Elite gate: rotating multiple-choice question on every Elite entry (Asia/Manila)."""
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.data.elite_profile_questions import (
-    ALL_QUESTIONS,
-    PRIMARY_QUESTIONS,
-    REPEATABLE_QUESTIONS,
-    EliteProfileQuestionDef,
-)
-from app.models.elite_profile_answer import EliteProfileAnswer
+from app.data.elite_profile_questions import ALL_QUESTIONS, question_for_gate_open
+from app.models.elite_profile_daily_answer import EliteProfileDailyAnswer
+
+MANILA = ZoneInfo("Asia/Manila")
 
 
-def _question_payload(q: EliteProfileQuestionDef) -> dict[str, Any]:
-    out: dict[str, Any] = {
+def today_local() -> date:
+    return datetime.now(MANILA).date()
+
+
+def _question_payload(q) -> dict[str, Any]:
+    return {
         "id": q.id,
         "prompt_en": q.prompt_en,
         "prompt_tl": q.prompt_tl,
-        "kind": q.kind,
-        "repeatable": q.repeatable,
-    }
-    if q.placeholder_en:
-        out["placeholder_en"] = q.placeholder_en
-    if q.placeholder_tl:
-        out["placeholder_tl"] = q.placeholder_tl
-    if q.options:
-        out["options"] = [
+        "kind": "select",
+        "options": [
             {"value": o.value, "label_en": o.label_en, "label_tl": o.label_tl} for o in q.options
-        ]
-    return out
-
-
-def _answered_ids(db: Session, user_id: int) -> set[str]:
-    rows = db.query(EliteProfileAnswer.question_id).filter(EliteProfileAnswer.user_id == user_id).all()
-    return {r[0] for r in rows}
-
-
-def profile_progress(db: Session, user_id: int) -> dict[str, int]:
-    answered = _answered_ids(db, user_id)
-    primary_ids = {q.id for q in PRIMARY_QUESTIONS}
-    primary_answered = len(answered & primary_ids)
-    return {
-        "primary_answered": primary_answered,
-        "primary_total": len(PRIMARY_QUESTIONS),
-        "total_answered": len(answered),
+        ],
     }
 
 
-def next_question_for_visit(db: Session, user_id: int) -> EliteProfileQuestionDef | None:
-    """One question per Elite access — next primary unanswered, else rotating repeatable."""
-    answered = _answered_ids(db, user_id)
-    for q in sorted(PRIMARY_QUESTIONS, key=lambda x: x.order):
-        if q.id not in answered:
-            return q
-
-    # All primary done — pick repeatable with oldest updated_at (or never answered).
-    best: EliteProfileQuestionDef | None = None
-    best_ts: float | None = None
-    for q in REPEATABLE_QUESTIONS:
-        row = (
-            db.query(EliteProfileAnswer)
-            .filter(EliteProfileAnswer.user_id == user_id, EliteProfileAnswer.question_id == q.id)
-            .first()
+def _answer_for_day(db: Session, user_id: int, d: date) -> EliteProfileDailyAnswer | None:
+    return (
+        db.query(EliteProfileDailyAnswer)
+        .filter(
+            EliteProfileDailyAnswer.user_id == user_id,
+            EliteProfileDailyAnswer.calendar_date == d,
         )
-        ts = row.updated_at.timestamp() if row else 0.0
-        if best is None or ts < (best_ts or 0.0):
-            best = q
-            best_ts = ts
-    return best
+        .first()
+    )
+
+
+def user_answered_today(db: Session, user_id: int, d: date | None = None) -> bool:
+    day = d or today_local()
+    row = _answer_for_day(db, user_id, day)
+    return row is not None and bool(row.answer_value.strip())
+
+
+def unlock_is_valid_today(unlock_at: datetime | None, d: date | None = None) -> bool:
+    if unlock_at is None:
+        return False
+    day = d or today_local()
+    if unlock_at.tzinfo is None:
+        unlock_at = unlock_at.replace(tzinfo=timezone.utc)
+    return unlock_at.astimezone(MANILA).date() == day
 
 
 def get_next_question_payload(db: Session, user_id: int) -> dict[str, Any]:
-    q = next_question_for_visit(db, user_id)
-    progress = profile_progress(db, user_id)
-    if q is None:
-        return {"question": None, "progress": progress}
-    return {"question": _question_payload(q), "progress": progress}
+    today = today_local()
+    row = _answer_for_day(db, user_id, today)
+    answered = row is not None and bool(row.answer_value.strip())
+    last_question_id = row.question_id if answered and row else None
+    session_q = question_for_gate_open(user_id, exclude_question_id=last_question_id)
+
+    base: dict[str, Any] = {
+        "gate_version": 2,
+        "calendar_date": today.isoformat(),
+        "todays_question_id": session_q.id,
+        "already_answered_today": answered,
+        # Gate is per Elite visit: client must POST /answer before premium even if answered earlier today.
+        "elite_ready": False,
+        "question": _question_payload(session_q),
+    }
+    if answered and row is not None and row.question_id == session_q.id:
+        base["previous_answer"] = row.answer_value
+    return base
 
 
 def save_answer(db: Session, user_id: int, question_id: str, answer_value: str) -> dict[str, Any]:
+    today = today_local()
     qdef = ALL_QUESTIONS.get(question_id)
     if not qdef:
         raise ValueError("Unknown question_id")
 
     value = answer_value.strip()
     if not value:
-        raise ValueError("Answer required")
+        raise ValueError("Pumili ng sagot bago magpatuloy.")
 
-    if qdef.kind == "select" and qdef.options:
-        allowed = {o.value for o in qdef.options}
-        if value not in allowed:
-            raise ValueError("Invalid option")
+    allowed = {o.value for o in qdef.options}
+    if value not in allowed:
+        raise ValueError("Invalid option")
 
-    if qdef.kind == "text" and len(value) > 120:
-        raise ValueError("Answer too long")
-
-    row = (
-        db.query(EliteProfileAnswer)
-        .filter(EliteProfileAnswer.user_id == user_id, EliteProfileAnswer.question_id == question_id)
-        .first()
-    )
+    row = _answer_for_day(db, user_id, today)
     if row:
+        row.question_id = question_id
         row.answer_value = value
     else:
         db.add(
-            EliteProfileAnswer(
+            EliteProfileDailyAnswer(
                 user_id=user_id,
+                calendar_date=today,
                 question_id=question_id,
                 answer_value=value,
             )
         )
     db.commit()
-    return {"ok": True, "progress": profile_progress(db, user_id)}
+    return {
+        "ok": True,
+        "calendar_date": today.isoformat(),
+        "already_answered_today": True,
+        "elite_ready": True,
+    }

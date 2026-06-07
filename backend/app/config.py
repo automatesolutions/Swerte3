@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     sheet_tab_9pm: str = "9PM"
     sheet_col_date: str = "Date"
     sheet_col_result: str = "Result"
+    # Local Windows dev: set true if Google Sheets CSV fetch fails SSL verify (PKIX).
+    sheet_fetch_insecure: bool = False
 
     access_token_expire_minutes: int = 60
     refresh_token_expire_days: int = 14
@@ -46,11 +48,11 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model_name: str = "gpt-4o-mini"
 
-    # Daily "Litrato" puzzle (OpenAI Images). Cheapest: dall-e-2 @ 256x256 (~$0.016/image).
+    # Daily "Litrato" puzzle (OpenAI Images). dall-e-2 was sunset; use gpt-image-1.
     openai_image_api_key: str = ""
     openai_image_base_url: str = "https://api.openai.com/v1"
-    openai_image_model: str = "dall-e-2"
-    openai_image_size: str = "256x256"
+    openai_image_model: str = "gpt-image-1"
+    openai_image_size: str = "1024x1024"
 
     sms_provider: str = "console"
     twilio_account_sid: str = ""

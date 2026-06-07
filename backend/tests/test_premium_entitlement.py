@@ -28,6 +28,18 @@ def test_premium_requires_unlock():
     assert r.status_code == 403
 
 
+def _answer_todays_gate(client, token: str) -> None:
+    r_next = client.get("/api/elite/profile/next", headers={"Authorization": f"Bearer {token}"})
+    assert r_next.status_code == 200
+    q = r_next.json()["question"]
+    r = client.post(
+        "/api/elite/profile/answer",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"question_id": q["id"], "answer": q["options"][0]["value"]},
+    )
+    assert r.status_code == 200
+
+
 def test_premium_start_unlocks_three_sessions_without_credits():
     phone = "+639" + uuid.uuid4().hex[:9]
     with TestClient(app) as client:
@@ -39,6 +51,7 @@ def test_premium_start_unlocks_three_sessions_without_credits():
             db.refresh(u)
             uid = u.id
             tok = create_access_token(str(u.id))
+            _answer_todays_gate(client, tok)
             rs = client.post(
                 "/api/predict/premium/start",
                 headers={"Authorization": f"Bearer {tok}"},
@@ -87,6 +100,7 @@ def test_premium_start_does_not_consume_credits_on_repeat():
             db.refresh(u)
             uid = u.id
             tok = create_access_token(str(u.id))
+            _answer_todays_gate(client, tok)
             r1 = client.post("/api/predict/premium/start", headers={"Authorization": f"Bearer {tok}"})
             r2 = client.post("/api/predict/premium/start", headers={"Authorization": f"Bearer {tok}"})
             db.expire_all()

@@ -7,6 +7,10 @@ import io
 import logging
 from datetime import date
 
+import truststore
+truststore.inject_into_ssl()
+
+import httpx
 from openai import OpenAI
 from PIL import Image
 
@@ -17,8 +21,9 @@ logger = logging.getLogger(__name__)
 # Bump when prompt or post-process changes so cached DB rows are regenerated.
 PICTURE_ANALYSIS_RENDER_VERSION = 2
 
-# DALL-E 2 pricing (per image): 256x256 is cheapest; 512x512 only slightly more.
-ALLOWED_DALLE2_SIZES = frozenset({"256x256", "512x512", "1024x1024"})
+# dall-e-2 was sunset by OpenAI; gpt-image-1 is the current model.
+DALLE2_IMAGE_SIZES = frozenset({"256x256", "512x512", "1024x1024"})
+GPT_IMAGE_SIZES = frozenset({"1024x1024", "1536x1024", "1024x1536", "auto"})
 
 THEMES: list[tuple[str, str]] = [
     (
@@ -89,6 +94,23 @@ def pad_png_b64(
     return base64.standard_b64encode(out_buf.getvalue()).decode("ascii")
 
 
+def _normalize_image_size(model: str, size: str, *, log_label: str) -> str:
+    model_l = model.lower()
+    allowed = DALLE2_IMAGE_SIZES if model_l in {"dall-e-2", "dalle-2"} else GPT_IMAGE_SIZES
+    if size in allowed:
+        return size
+    fallback = "1024x1024"
+    logger.warning(
+        "%s: unsupported image size %r for model %s; using %s (allowed: %s)",
+        log_label,
+        size,
+        model,
+        fallback,
+        ", ".join(sorted(allowed)),
+    )
+    return fallback
+
+
 def dalle_bw_b64(
     full_prompt: str,
     settings: Settings,
@@ -96,15 +118,17 @@ def dalle_bw_b64(
     log_label: str,
     size_override: str | None = None,
 ) -> tuple[str, str]:
-    """Run OpenAI Images (default dall-e-2) with a fully composed prompt. Returns (b64, mime)."""
+    """Run OpenAI Images (gpt-image-1) with a fully composed prompt. Returns (b64, mime)."""
     api_key = _image_api_key(settings)
     if not api_key:
         raise RuntimeError("OpenAI API key not configured (set OPENAI_IMAGE_API_KEY or LLM_API_KEY)")
 
-    model = (settings.openai_image_model or "dall-e-2").strip()
-    size = (size_override or settings.openai_image_size or "256x256").strip()
-    if model == "dall-e-2" and size not in ALLOWED_DALLE2_SIZES:
-        size = "256x256"
+    model = (settings.openai_image_model or "gpt-image-1").strip()
+    size = _normalize_image_size(
+        model,
+        (size_override or settings.openai_image_size or "1024x1024").strip(),
+        log_label=log_label,
+    )
 
     base_url = (settings.openai_image_base_url or "https://api.openai.com/v1").rstrip("/")
     client = OpenAI(api_key=api_key, base_url=base_url)
@@ -113,10 +137,8 @@ def dalle_bw_b64(
         "model": model,
         "prompt": full_prompt,
         "n": 1,
-        "response_format": "b64_json",
+        "size": size,
     }
-    if model == "dall-e-2":
-        gen_kwargs["size"] = size if size in ALLOWED_DALLE2_SIZES else "256x256"
 
     logger.info(
         "%s: dalle model=%s size=%s",
@@ -127,18 +149,27 @@ def dalle_bw_b64(
 
     resp = client.images.generate(**gen_kwargs)
     data = resp.data[0]
-    if not data.b64_json:
-        raise RuntimeError("OpenAI returned no image data")
-    return data.b64_json, "image/png"
+
+    # Newer OpenAI API versions return a URL instead of b64_json.
+    if data.b64_json:
+        return data.b64_json, "image/png"
+
+    if data.url:
+        img_resp = httpx.get(data.url, timeout=30)
+        img_resp.raise_for_status()
+        raw = img_resp.content
+        # Convert to PNG if not already (some models return WEBP/JPEG).
+        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        buf = io.BytesIO()
+        im.save(buf, format="PNG", optimize=True)
+        return base64.standard_b64encode(buf.getvalue()).decode("ascii"), "image/png"
+
+    raise RuntimeError("OpenAI returned no image data (no b64_json or url)")
 
 
 def generate_bw_cartoon(user_id: int, cal: date, settings: Settings) -> tuple[str, str, str]:
-    """
-    Returns (base64_png, mime_type, theme_key).
-    Uses dall-e-2 with 512x512 when model is dall-e-2 for clearer full-scene detail.
-    """
+    """Returns (base64_png, mime_type, theme_key)."""
     theme_key, scene = _theme_for(user_id, cal)
-    # DALL-E 2 images.generations enforces prompt length <= 1000 characters.
     prompt = (
         "B&W cartoon: bold black ink on white, comic style, no color or photo. Digit-spotting puzzle. "
         f"{scene} "
@@ -146,16 +177,10 @@ def generate_bw_cartoon(user_id: int, cal: date, settings: Settings) -> tuple[st
         "no figure, digit, sign, or object touches the outer border; digits fully readable. "
         "No 3D. Family-friendly. No gambling."
     )
-    if len(prompt) > 1000:
-        logger.error("picture_analysis prompt length %s exceeds DALL-E 2 limit", len(prompt))
-        raise RuntimeError("Image prompt exceeds API length limit")
-    model = (settings.openai_image_model or "dall-e-2").strip()
-    size_ov = "512x512" if model == "dall-e-2" else None
     b64, mime = dalle_bw_b64(
         prompt,
         settings,
         log_label=f"picture_analysis user={user_id} date={cal}",
-        size_override=size_ov,
     )
     b64 = pad_png_b64(b64)
     return b64, mime, theme_key
@@ -179,7 +204,6 @@ def generate_bw_cartoon_scene(scene_description: str, settings: Settings, *, log
 def generate_bw_cognitive_matrix_scene(scene_description: str, settings: Settings, *, log_label: str) -> tuple[str, str]:
     """
     Nonverbal cognitive practice sheet: quadrant circles (Tests.com / CogAT-style), not sketches or number grids.
-    Uses larger default resolution when model is dall-e-2 so figures stay readable.
     """
     prompt = (
         "Official nonverbal cognitive ABILITIES PRACTICE TEST figure — technical diagram, NOT an illustration. "
@@ -205,9 +229,7 @@ def generate_bw_cognitive_matrix_scene(scene_description: str, settings: Setting
         "Do not indicate which choice is correct. White background. Black ink only. No gray gradients. No color. "
         "No photorealism. No gambling."
     )
-    model = (settings.openai_image_model or "dall-e-2").strip()
-    size_ov = "512x512" if model == "dall-e-2" else None
-    return dalle_bw_b64(prompt, settings, log_label=log_label, size_override=size_ov)
+    return dalle_bw_b64(prompt, settings, log_label=log_label)
 
 
 def generate_tests_com_style_cognitive_scene(scene_description: str, settings: Settings, *, log_label: str) -> tuple[str, str]:

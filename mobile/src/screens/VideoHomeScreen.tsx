@@ -7,8 +7,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  TouchableOpacity,
   View,
 } from 'react-native';
+import Constants from 'expo-constants';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Text } from 'react-native-paper';
@@ -18,7 +20,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { getStoredAccessToken, saveAuthTokens } from '../auth/storage';
 import { stashWelcomePrefetch } from '../navigation/welcomePrefetch';
-import { fetchUserMe, registerGuestSession, userNeedsProfile } from '../services/api';
+import { fetchUserMe, registerGuestSession, resetApiBaseCache, userNeedsProfile } from '../services/api';
 import type { RootStackParamList } from '../navigation/types';
 
 const logoSource = require('../../assets/Logo.png');
@@ -30,33 +32,45 @@ const WELCOME_CLIPS_LOCAL = [
   require('../../assets/Video4.mp4'),
 ] as const;
 
+/** Android: expo-video SurfaceView/TextureView can cover the whole screen and block all touches in Expo Go. */
+const USE_INTRO_VIDEO = Platform.OS === 'ios' || Platform.OS === 'web';
+
+/**
+ * Expo Go on Android draws an invisible full-screen layer above the RN view tree (blocks Skip/Continue).
+ * Auto-continue is the only reliable path until you use a dev build (`npx expo run:android`).
+ */
+const IS_EXPO_GO_ANDROID =
+  Platform.OS === 'android' &&
+  (Constants.appOwnership === 'expo' || Constants.executionEnvironment === 'storeClient');
+
+const EXPO_GO_AUTO_CONTINUE_SEC = 3;
+
 type Props = NativeStackScreenProps<RootStackParamList, 'VideoHome'>;
 
-export function VideoHomeScreen({ navigation }: Props): React.ReactElement {
-  const insets = useSafeAreaInsets();
-  const isWeb = Platform.OS === 'web';
+type WelcomeNav = {
+  continuing: boolean;
+  continueAfterWelcome: () => Promise<void>;
+};
 
-  const envVideoUrl = process.env.EXPO_PUBLIC_VIDEO_HOME_URL?.trim() ?? '';
-  const useRemoteSingleClip = envVideoUrl.length > 0;
-
-  const [clipIndex, setClipIndex] = useState(0);
-  const clipIndexRef = useRef(0);
-  clipIndexRef.current = clipIndex;
-
-  /** Web: autoplay with sound is blocked; start muted, then unmute after user taps the video. */
-  const [webSoundUnlocked, setWebSoundUnlocked] = useState(false);
-  const webSoundUnlockedRef = useRef(false);
-  webSoundUnlockedRef.current = webSoundUnlocked;
-
-  const source = useMemo(() => {
-    if (useRemoteSingleClip) return { uri: envVideoUrl };
-    return WELCOME_CLIPS_LOCAL[clipIndex];
-  }, [useRemoteSingleClip, envVideoUrl, clipIndex]);
-
-  const [playerStatus, setPlayerStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  /** True while guest session + /me + navigation run — avoids “nothing happens” with no feedback. */
-  const [continuing, setContinuing] = useState(false);
+function useWelcomeNavigation(navigation: Props['navigation']): WelcomeNav {
   const continueInFlight = useRef(false);
+  const [continuing, setContinuing] = useState(false);
+
+  const leaveWelcome = useCallback(
+    (routeName: 'ProfileSetup' | 'Home', params?: RootStackParamList['ProfileSetup']) => {
+      setContinuing(false);
+      continueInFlight.current = false;
+      if (Platform.OS === 'web') {
+        navigation.replace(routeName, params);
+        return;
+      }
+      navigation.reset({
+        index: 0,
+        routes: [{ name: routeName, params }],
+      });
+    },
+    [navigation],
+  );
 
   const continueAfterWelcome = useCallback(async () => {
     if (continueInFlight.current) return;
@@ -72,7 +86,7 @@ export function VideoHomeScreen({ navigation }: Props): React.ReactElement {
         } catch {
           Alert.alert(
             'Connection',
-            'Could not start a guest session. Check that the API is running (e.g. http://localhost:8000) and try Continue again.',
+            'Could not start a guest session. Check that the API is running (e.g. http://10.0.2.2:8000) and try Continue again.',
           );
           return;
         }
@@ -81,14 +95,12 @@ export function VideoHomeScreen({ navigation }: Props): React.ReactElement {
         const me = await fetchUserMe(token);
         if (userNeedsProfile(me)) {
           stashWelcomePrefetch(me);
-          // replace is more reliable than reset on Expo web + native-stack
-          navigation.replace('ProfileSetup', { from: 'onboarding' });
+          leaveWelcome('ProfileSetup', { from: 'onboarding' });
         } else {
-          navigation.replace('Home');
+          leaveWelcome('Home');
         }
       } catch {
-        // Prefer Profile when /me fails so first-time users don’t land on Home without phone/alias.
-        navigation.replace('ProfileSetup', { from: 'onboarding' });
+        leaveWelcome('ProfileSetup', { from: 'onboarding' });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Could not leave the welcome screen.';
@@ -97,7 +109,46 @@ export function VideoHomeScreen({ navigation }: Props): React.ReactElement {
       continueInFlight.current = false;
       setContinuing(false);
     }
-  }, [navigation]);
+  }, [leaveWelcome]);
+
+  return { continuing, continueAfterWelcome };
+}
+
+function AndroidIntroPanel({ clipIndex }: { clipIndex: number }): React.ReactElement {
+  return (
+    <View style={styles.androidIntroPanel}>
+      <Image source={logoSource} style={styles.androidIntroLogo} resizeMode="contain" accessibilityLabel="Swerte3" />
+      <Text style={styles.androidIntroTitle}>Welcome to Swerte3</Text>
+      <Text style={styles.androidIntroBody}>
+        Intro {clipIndex + 1} ng {WELCOME_CLIPS_LOCAL.length} — i-tap ang Continue o Skip para magpatuloy.
+      </Text>
+    </View>
+  );
+}
+
+type IntroVideoProps = {
+  source: number | { uri: string };
+  isWeb: boolean;
+  webSoundUnlocked: boolean;
+  onWebSoundUnlock: () => void;
+  onClipEnd: () => void;
+  onStatusLoading: () => void;
+  onStatusReady: () => void;
+  onStatusError: () => void;
+};
+
+function IntroVideoClip({
+  source,
+  isWeb,
+  webSoundUnlocked,
+  onWebSoundUnlock,
+  onClipEnd,
+  onStatusLoading,
+  onStatusReady,
+  onStatusError,
+}: IntroVideoProps): React.ReactElement {
+  const webSoundUnlockedRef = useRef(webSoundUnlocked);
+  webSoundUnlockedRef.current = webSoundUnlocked;
 
   const player = useVideoPlayer(source, (p) => {
     p.loop = false;
@@ -110,7 +161,80 @@ export function VideoHomeScreen({ navigation }: Props): React.ReactElement {
     void p.play();
   });
 
-  useEventListener(player, 'playToEnd', () => {
+  useEventListener(player, 'playToEnd', onClipEnd);
+  useEventListener(player, 'statusChange', ({ status }) => {
+    if (status === 'loading') onStatusLoading();
+    if (status === 'readyToPlay') {
+      onStatusReady();
+      player.volume = 1;
+      if (isWeb) {
+        player.muted = !webSoundUnlockedRef.current;
+      } else {
+        player.muted = false;
+      }
+      void player.play();
+    }
+    if (status === 'error') onStatusError();
+  });
+
+  return (
+    <View style={styles.videoStage}>
+      <VideoView
+        style={styles.video}
+        player={player}
+        nativeControls={false}
+        contentFit="cover"
+        allowsFullscreen={false}
+      />
+      {isWeb && !webSoundUnlocked ? (
+        <Pressable
+          style={styles.webSoundOverlay}
+          onPress={() => {
+            onWebSoundUnlock();
+            player.muted = false;
+            player.volume = 1;
+            void player.play();
+          }}
+          accessibilityLabel="Tap to turn on sound for the intro"
+          accessibilityRole="button"
+        >
+          <View style={styles.webSoundHint} pointerEvents="none">
+            <Text style={styles.webSoundHintText}>Tap for sound</Text>
+          </View>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+export function VideoHomeScreen({ navigation }: Props): React.ReactElement {
+  const insets = useSafeAreaInsets();
+  const isWeb = Platform.OS === 'web';
+  const { continuing, continueAfterWelcome } = useWelcomeNavigation(navigation);
+
+  const envVideoUrl = process.env.EXPO_PUBLIC_VIDEO_HOME_URL?.trim() ?? '';
+  const useRemoteSingleClip = envVideoUrl.length > 0;
+
+  const [clipIndex, setClipIndex] = useState(0);
+  const clipIndexRef = useRef(0);
+  clipIndexRef.current = clipIndex;
+
+  const [webSoundUnlocked, setWebSoundUnlocked] = useState(false);
+  const [playerStatus, setPlayerStatus] = useState<'loading' | 'ready' | 'error'>(
+    USE_INTRO_VIDEO ? 'loading' : 'ready',
+  );
+  const [expoGoCountdown, setExpoGoCountdown] = useState<number | null>(
+    IS_EXPO_GO_ANDROID ? EXPO_GO_AUTO_CONTINUE_SEC : null,
+  );
+  const continueAfterWelcomeRef = useRef(continueAfterWelcome);
+  continueAfterWelcomeRef.current = continueAfterWelcome;
+
+  const source = useMemo(() => {
+    if (useRemoteSingleClip) return { uri: envVideoUrl };
+    return WELCOME_CLIPS_LOCAL[clipIndex];
+  }, [useRemoteSingleClip, envVideoUrl, clipIndex]);
+
+  const handleClipEnd = useCallback(() => {
     if (useRemoteSingleClip) {
       void continueAfterWelcome();
       return;
@@ -122,67 +246,91 @@ export function VideoHomeScreen({ navigation }: Props): React.ReactElement {
     }
     setPlayerStatus('loading');
     setClipIndex(i + 1);
-  });
-
-  useEventListener(player, 'statusChange', ({ status }) => {
-    if (status === 'loading') setPlayerStatus('loading');
-    if (status === 'readyToPlay') {
-      setPlayerStatus('ready');
-      // Initial play() in setup can run before the asset is ready; resume here so playback doesn’t stay paused.
-      player.volume = 1;
-      if (isWeb) {
-        player.muted = !webSoundUnlockedRef.current;
-      } else {
-        player.muted = false;
-      }
-      void player.play();
-    }
-    if (status === 'error') setPlayerStatus('error');
-  });
+  }, [continueAfterWelcome, useRemoteSingleClip]);
 
   useEffect(() => {
+    if (!USE_INTRO_VIDEO) return;
     const t = setTimeout(() => {
       setPlayerStatus((s) => (s === 'loading' ? 'error' : s));
     }, 20000);
     return () => clearTimeout(t);
   }, [clipIndex]);
 
-  const showVideo = playerStatus !== 'error';
-  const showLoading = playerStatus === 'loading';
+  useEffect(() => {
+    if (!IS_EXPO_GO_ANDROID) return;
+    const tick = setInterval(() => {
+      setExpoGoCountdown((c) => (c !== null && c > 1 ? c - 1 : c));
+    }, 1000);
+    const go = setTimeout(() => {
+      setExpoGoCountdown(null);
+      resetApiBaseCache();
+      void continueAfterWelcomeRef.current();
+    }, EXPO_GO_AUTO_CONTINUE_SEC * 1000);
+    return () => {
+      clearInterval(tick);
+      clearTimeout(go);
+    };
+  }, []);
 
-  return (
-    <View style={styles.root} accessibilityLabel="Swerte3 intro">
-      {continuing ? (
-        <View style={styles.navigatingOverlay} pointerEvents="box-none">
-          <ActivityIndicator size="large" color="#ecffe9" />
-          <Text style={styles.navigatingCaption}>Connecting…</Text>
-          <Text style={styles.navigatingHint}>Starting your session (needs the backend API)</Text>
-        </View>
-      ) : null}
-      <StatusBar style="light" />
-      <LinearGradient
-        colors={['#143d28', '#1e4a31', '#2f6b45', '#1a3020']}
-        locations={[0, 0.35, 0.72, 1]}
-        style={StyleSheet.absoluteFillObject}
-      />
+  const showVideo = USE_INTRO_VIDEO && playerStatus !== 'error';
+  const showLoading = USE_INTRO_VIDEO && playerStatus === 'loading';
 
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingTop: Math.max(insets.top, 12), paddingBottom: Math.max(insets.bottom, 20) },
-        ]}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
+  const contentPadding = {
+    paddingTop: Math.max(insets.top, 12),
+    paddingBottom: Math.max(insets.bottom, 20),
+  };
+
+  const skipControl =
+    Platform.OS === 'android' ? (
+      <TouchableOpacity
+        style={[styles.skipPill, { alignSelf: 'flex-end' }, continuing && styles.ctaDisabled]}
+        onPress={() => void continueAfterWelcome()}
+        disabled={continuing}
+        activeOpacity={0.7}
+        accessibilityLabel="Skip intro"
+        accessibilityRole="button"
       >
-        <Pressable
-          style={[styles.skipPill, { alignSelf: 'flex-end' }, continuing && styles.ctaDisabled]}
-          onPress={() => void continueAfterWelcome()}
-          disabled={continuing}
-          accessibilityLabel="Skip intro"
-          accessibilityRole="button"
-        >
-          <Text style={styles.skipText}>Skip</Text>
-        </Pressable>
+        <Text style={styles.skipText}>Skip</Text>
+      </TouchableOpacity>
+    ) : (
+      <Pressable
+        style={[styles.skipPill, { alignSelf: 'flex-end' }, continuing && styles.ctaDisabled]}
+        onPress={() => void continueAfterWelcome()}
+        disabled={continuing}
+        accessibilityLabel="Skip intro"
+        accessibilityRole="button"
+      >
+        <Text style={styles.skipText}>Skip</Text>
+      </Pressable>
+    );
+
+  const continueControl =
+    Platform.OS === 'android' ? (
+      <TouchableOpacity
+        style={[styles.cta, continuing && styles.ctaDisabled]}
+        onPress={() => void continueAfterWelcome()}
+        disabled={continuing}
+        activeOpacity={0.85}
+        accessibilityLabel="Continue to profile or home"
+        accessibilityRole="button"
+      >
+        <Text style={styles.ctaText}>{continuing ? 'Connecting…' : 'Continue'}</Text>
+      </TouchableOpacity>
+    ) : (
+      <Pressable
+        style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed, continuing && styles.ctaDisabled]}
+        onPress={() => void continueAfterWelcome()}
+        disabled={continuing}
+        accessibilityLabel="Continue to profile or home"
+        accessibilityRole="button"
+      >
+        <Text style={styles.ctaText}>Continue</Text>
+      </Pressable>
+    );
+
+  const body = (
+    <>
+      {skipControl}
 
         <View style={styles.brandBlock}>
           <Image source={logoSource} style={styles.logo} resizeMode="contain" accessibilityLabel="Swerte3 logo" />
@@ -196,39 +344,18 @@ export function VideoHomeScreen({ navigation }: Props): React.ReactElement {
             style={styles.videoShellBorder}
           >
             <View style={styles.videoInner}>
-              {showVideo ? (
+              {USE_INTRO_VIDEO && showVideo ? (
                 <>
-                  {/*
-                    Keep a single VideoView mount. Switching between wrapped/unwrapped trees was
-                    remounting the view on web and detaching playback when “Tap for sound” fired.
-                  */}
-                  <View style={styles.videoStage}>
-                    <VideoView
-                      style={styles.video}
-                      player={player}
-                      nativeControls={false}
-                      contentFit="cover"
-                      allowsFullscreen={false}
-                    />
-                    {isWeb && !webSoundUnlocked ? (
-                      <Pressable
-                        style={styles.webSoundOverlay}
-                        onPress={() => {
-                          webSoundUnlockedRef.current = true;
-                          setWebSoundUnlocked(true);
-                          player.muted = false;
-                          player.volume = 1;
-                          void player.play();
-                        }}
-                        accessibilityLabel="Tap to turn on sound for the intro"
-                        accessibilityRole="button"
-                      >
-                        <View style={styles.webSoundHint} pointerEvents="none">
-                          <Text style={styles.webSoundHintText}>Tap for sound</Text>
-                        </View>
-                      </Pressable>
-                    ) : null}
-                  </View>
+                  <IntroVideoClip
+                    source={source}
+                    isWeb={isWeb}
+                    webSoundUnlocked={webSoundUnlocked}
+                    onWebSoundUnlock={() => setWebSoundUnlocked(true)}
+                    onClipEnd={handleClipEnd}
+                    onStatusLoading={() => setPlayerStatus('loading')}
+                    onStatusReady={() => setPlayerStatus('ready')}
+                    onStatusError={() => setPlayerStatus('error')}
+                  />
                   {showLoading ? (
                     <View style={styles.loadingOverlay} pointerEvents="none">
                       <ActivityIndicator size="large" color="#ecffe9" />
@@ -236,37 +363,61 @@ export function VideoHomeScreen({ navigation }: Props): React.ReactElement {
                     </View>
                   ) : null}
                 </>
-              ) : (
+              ) : USE_INTRO_VIDEO ? (
                 <View style={styles.fallbackPanel}>
                   <Text style={styles.fallbackTitle}>Welcome to Swerte3</Text>
                   <Text style={styles.fallbackBody}>
                     We couldn’t load the intro video. You can still continue to the home screen.
                   </Text>
                 </View>
+              ) : (
+                <AndroidIntroPanel clipIndex={clipIndex} />
               )}
             </View>
           </LinearGradient>
         </View>
 
-        <Pressable
-          style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed, continuing && styles.ctaDisabled]}
-          onPress={() => void continueAfterWelcome()}
-          disabled={continuing}
-          accessibilityLabel="Continue to profile or home"
-          accessibilityRole="button"
-        >
-          <Text style={styles.ctaText}>Continue</Text>
-        </Pressable>
+      {continueControl}
 
-        <Text style={styles.hint}>
-          {useRemoteSingleClip
-            ? 'Susunod: profile (mobile + alias) kung kinakailangan, pagkatapos ay Home. O hintayin ang video.'
-            : `Intro ${clipIndex + 1} ng ${WELCOME_CLIPS_LOCAL.length} — susunod ang profile kung kinakailangan, pagkatapos ay Home.`}
-          {isWeb && !webSoundUnlocked
-            ? '\n\nSa web, tumatakbo muna ang video nang naka-mute (patakaran ng browser). I-tap ang video para sa tunog.'
-            : ''}
-        </Text>
-      </ScrollView>
+      <Text style={styles.hint}>
+        {useRemoteSingleClip
+          ? 'Susunod: profile (mobile + alias) kung kinakailangan, pagkatapos ay Home. O hintayin ang video.'
+          : `Intro ${clipIndex + 1} ng ${WELCOME_CLIPS_LOCAL.length} — susunod ang profile kung kinakailangan, pagkatapos ay Home.`}
+        {isWeb && !webSoundUnlocked
+          ? '\n\nSa web, tumatakbo muna ang video nang naka-mute (patakaran ng browser). I-tap ang video para sa tunog.'
+          : ''}
+        {!USE_INTRO_VIDEO
+          ? IS_EXPO_GO_ANDROID && expoGoCountdown !== null
+            ? `\n\nExpo Go: hindi gumagana ang tap sa emulator — auto-continue sa ${expoGoCountdown}s…`
+            : '\n\nSa Android, static intro lang — i-tap ang Continue o Skip.'
+          : ''}
+      </Text>
+    </>
+  );
+
+  return (
+    <View style={styles.root} accessibilityLabel="Swerte3 intro">
+      <StatusBar style="light" />
+      <LinearGradient
+        colors={['#143d28', '#1e4a31', '#2f6b45', '#1a3020']}
+        locations={[0, 0.35, 0.72, 1]}
+        style={StyleSheet.absoluteFillObject}
+        pointerEvents="none"
+      />
+
+      {Platform.OS === 'android' ? (
+        <View style={[styles.scrollContent, styles.androidBody, contentPadding]}>{body}</View>
+      ) : (
+        <ScrollView
+          style={styles.androidBody}
+          contentContainerStyle={[styles.scrollContent, contentPadding]}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          keyboardShouldPersistTaps="always"
+        >
+          {body}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -300,6 +451,11 @@ const styles = StyleSheet.create({
   ctaDisabled: {
     opacity: 0.55,
   },
+  androidBody: {
+    flex: 1,
+    zIndex: 2,
+    elevation: 2,
+  },
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
@@ -311,6 +467,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
     marginBottom: 8,
+    zIndex: 10,
+    elevation: 10,
   },
   skipText: {
     color: '#ecffe9',
@@ -417,6 +575,30 @@ const styles = StyleSheet.create({
     color: '#b8e3bc',
     textAlign: 'center',
   },
+  androidIntroPanel: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  androidIntroLogo: {
+    width: 100,
+    height: 100,
+    marginBottom: 12,
+  },
+  androidIntroTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ecffe9',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  androidIntroBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#b8e3bc',
+    textAlign: 'center',
+  },
   cta: {
     backgroundColor: '#2f855a',
     paddingVertical: 16,
@@ -428,7 +610,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
-    elevation: 4,
+    elevation: 10,
+    zIndex: 10,
   },
   ctaPressed: {
     opacity: 0.92,

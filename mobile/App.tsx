@@ -1,5 +1,7 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Provider as PaperProvider, MD3LightTheme } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
@@ -22,11 +24,17 @@ const theme = {
 
 export default function App(): React.ReactElement {
   return (
-    <SafeAreaProvider>
-      <PaperProvider theme={theme}>
-        <RootNavigator />
-        <StatusBar style="auto" />
-      </PaperProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={styles.root}>
+      <SafeAreaProvider>
+        <PaperProvider theme={theme}>
+          <RootNavigator />
+          <StatusBar style="auto" />
+        </PaperProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+});

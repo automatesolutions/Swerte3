@@ -1,3 +1,5 @@
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import { getStoredRefreshToken, saveAuthTokens } from '../auth/storage';
 
 /** Android emulator host; browsers cannot reach it — use localhost when the app runs on web. */
@@ -13,13 +15,76 @@ function defaultApiBaseFromEnvironment(): string {
   return 'http://10.0.2.2:8000';
 }
 
-const API_BASE = (process.env.EXPO_PUBLIC_API_URL ?? defaultApiBaseFromEnvironment()).replace(/\/$/, '');
+/** True on Android Studio AVD — use host loopback via 10.0.2.2 for local API. */
+function isAndroidEmulator(): boolean {
+  if (Platform.OS !== 'android') return false;
+  const c = Platform.constants as Record<string, unknown>;
+  const model = String(c.Model ?? '').toLowerCase();
+  const fingerprint = String(c.Fingerprint ?? '').toLowerCase();
+  return (
+    fingerprint.includes('generic') ||
+    model.includes('sdk') ||
+    model.includes('emulator') ||
+    model.includes('gphone')
+  );
+}
+
+/** Same LAN host Metro uses (e.g. 192.168.x.x:8083) — often works when 10.0.2.2 does not. */
+function emulatorApiHostFromMetro(): string | null {
+  const raw =
+    Constants.expoGoConfig?.debuggerHost ??
+    Constants.expoConfig?.hostUri ??
+    (Constants.manifest2 as { extra?: { expoClient?: { hostUri?: string } } } | null)?.extra?.expoClient
+      ?.hostUri;
+  if (!raw) return null;
+  const stripped = raw.replace(/^exp:\/\//, '').split('/')[0] ?? '';
+  const host = stripped.split(':')[0]?.trim();
+  if (!host || host === 'localhost' || host === '127.0.0.1') return null;
+  return `http://${host}:8000`;
+}
+
+function resolveApiBase(): string {
+  // EAS preview APKs bake Cloud Run URLs; on the local AVD hit the host backend.
+  if (isAndroidEmulator()) {
+    return emulatorApiHostFromMetro() ?? 'http://10.0.2.2:8000';
+  }
+  let base = (process.env.EXPO_PUBLIC_API_URL ?? defaultApiBaseFromEnvironment()).replace(/\/$/, '');
+  if (Platform.OS === 'android' && /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(base)) {
+    base = 'http://10.0.2.2:8000';
+  }
+  return base;
+}
+
+let cachedApiBase: string | null = null;
+
+function apiBase(): string {
+  if (!cachedApiBase) {
+    cachedApiBase = resolveApiBase();
+  }
+  return cachedApiBase;
+}
+
+/** Shown in profile/network error UI on native builds. */
+export function getApiBaseUrl(): string {
+  return apiBase();
+}
+
+/** Re-resolve after Expo Go connects to Metro (debuggerHost not ready at import time). */
+export function resetApiBaseCache(): void {
+  cachedApiBase = null;
+}
 
 const FETCH_TIMEOUT_MS = 25000;
+/** OpenAI image generation (Litrato / cognitive) can take 30–60s on first load. */
+const IMAGE_FETCH_TIMEOUT_MS = 90000;
 
-async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  init?: RequestInit,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<Response> {
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
@@ -51,7 +116,7 @@ async function tryRefreshAccessToken(): Promise<string | null> {
   const refresh = await getStoredRefreshToken();
   if (!refresh?.trim()) return null;
   try {
-    const res = await fetchWithTimeout(`${API_BASE}/api/auth/refresh`, {
+    const res = await fetchWithTimeout(`${apiBase()}/api/auth/refresh`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refresh }),
@@ -65,8 +130,11 @@ async function tryRefreshAccessToken(): Promise<string | null> {
   }
 }
 
-async function getJson<T>(path: string, init?: RequestInit & { token?: string | null }): Promise<T> {
-  const { token, ...rest } = init ?? {};
+async function getJson<T>(
+  path: string,
+  init?: RequestInit & { token?: string | null; timeoutMs?: number },
+): Promise<T> {
+  const { token, timeoutMs, ...rest } = init ?? {};
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(rest.headers as Record<string, string> | undefined),
@@ -74,12 +142,12 @@ async function getJson<T>(path: string, init?: RequestInit & { token?: string | 
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  let res = await fetchWithTimeout(`${API_BASE}${path}`, { ...rest, headers });
+  let res = await fetchWithTimeout(`${apiBase()}${path}`, { ...rest, headers }, timeoutMs);
   if (res.status === 401 && token) {
     const next = await tryRefreshAccessToken();
     if (next) {
       headers.Authorization = `Bearer ${next}`;
-      res = await fetchWithTimeout(`${API_BASE}${path}`, { ...rest, headers });
+      res = await fetchWithTimeout(`${apiBase()}${path}`, { ...rest, headers }, timeoutMs);
     }
   }
   if (!res.ok) {
@@ -104,7 +172,7 @@ async function postJson<T>(
     headers.Authorization = `Bearer ${token}`;
   }
   const reqBody = JSON.stringify(body);
-  let res = await fetchWithTimeout(`${API_BASE}${path}`, {
+  let res = await fetchWithTimeout(`${apiBase()}${path}`, {
     ...rest,
     method: 'POST',
     headers,
@@ -114,7 +182,7 @@ async function postJson<T>(
     const next = await tryRefreshAccessToken();
     if (next) {
       headers.Authorization = `Bearer ${next}`;
-      res = await fetchWithTimeout(`${API_BASE}${path}`, {
+      res = await fetchWithTimeout(`${apiBase()}${path}`, {
         ...rest,
         method: 'POST',
         headers,
@@ -144,7 +212,7 @@ async function putJson<T>(
     headers.Authorization = `Bearer ${token}`;
   }
   const reqBody = JSON.stringify(body);
-  let res = await fetchWithTimeout(`${API_BASE}${path}`, {
+  let res = await fetchWithTimeout(`${apiBase()}${path}`, {
     ...rest,
     method: 'PUT',
     headers,
@@ -154,7 +222,7 @@ async function putJson<T>(
     const next = await tryRefreshAccessToken();
     if (next) {
       headers.Authorization = `Bearer ${next}`;
-      res = await fetchWithTimeout(`${API_BASE}${path}`, {
+      res = await fetchWithTimeout(`${apiBase()}${path}`, {
         ...rest,
         method: 'PUT',
         headers,
@@ -228,24 +296,22 @@ export type EliteProfileOption = {
 
 export type EliteProfileQuestion = {
   id: string;
-  prompt_en:  string;
+  prompt_en: string;
   prompt_tl: string;
-  kind: 'select' | 'text';
-  repeatable?: boolean;
-  placeholder_en?: string;
-  placeholder_tl?: string;
-  options?: EliteProfileOption[];
-};
-
-export type EliteProfileProgress = {
-  primary_answered: number;
-  primary_total: number;
-  total_answered: number;
+  kind: 'select';
+  options: EliteProfileOption[];
 };
 
 export type EliteProfileNextResult = {
+  /** 2 = always returns a question per GINTO visit */
+  gate_version?: number;
+  calendar_date: string;
+  todays_question_id: string;
   question: EliteProfileQuestion | null;
-  progress: EliteProfileProgress;
+  already_answered_today: boolean;
+  elite_ready: boolean;
+  /** Last answer today, if any — user may change it on re-entry. */
+  previous_answer?: string | null;
 };
 
 export function fetchEliteProfileNext(token: string): Promise<EliteProfileNextResult> {
@@ -256,12 +322,18 @@ export function submitEliteProfileAnswer(
   token: string,
   questionId: string,
   answer: string,
-): Promise<{ ok: boolean; progress: EliteProfileProgress }> {
-  return postJson<{ ok: boolean; progress: EliteProfileProgress }>(
-    '/api/elite/profile/answer',
-    { question_id: questionId, answer },
-    { token },
-  );
+): Promise<{
+  ok: boolean;
+  calendar_date: string;
+  already_answered_today: boolean;
+  elite_ready: boolean;
+}> {
+  return postJson<{
+    ok: boolean;
+    calendar_date: string;
+    already_answered_today: boolean;
+    elite_ready: boolean;
+  }>('/api/elite/profile/answer', { question_id: questionId, answer }, { token });
 }
 
 export function fetchDailyPredictions(targetDate: string, variationKey?: string): Promise<DailyPredictionResponse> {
@@ -271,7 +343,7 @@ export function fetchDailyPredictions(targetDate: string, variationKey?: string)
 }
 
 export async function requestOtp(phone: string): Promise<void> {
-  const res = await fetchWithTimeout(`${API_BASE}/api/auth/otp/request`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/auth/otp/request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone: phone.trim() }),
@@ -364,7 +436,7 @@ export function fetchUserMe(token: string): Promise<UserMe> {
 }
 
 export async function registerGuestSession(): Promise<TokenPair> {
-  const res = await fetchWithTimeout(`${API_BASE}/api/auth/guest`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/auth/guest`, {
     method: 'POST',
     headers: { Accept: 'application/json' },
   });
@@ -539,7 +611,10 @@ export type DailyPictureAnalysis = {
 
 export function fetchDailyPictureAnalysis(token?: string | null): Promise<DailyPictureAnalysis> {
   const t = token?.trim();
-  return getJson<DailyPictureAnalysis>('/api/picture-analysis/daily', t ? { token: t } : {});
+  return getJson<DailyPictureAnalysis>('/api/picture-analysis/daily', {
+    ...(t ? { token: t } : {}),
+    timeoutMs: IMAGE_FETCH_TIMEOUT_MS,
+  });
 }
 
 export type DailyMathCognitive = {
@@ -568,7 +643,10 @@ export type MathCognitiveGuessResult = {
 
 export function fetchDailyMathCognitive(token?: string | null): Promise<DailyMathCognitive> {
   const t = token?.trim();
-  return getJson<DailyMathCognitive>('/api/math-cognitive/daily', t ? { token: t } : {});
+  return getJson<DailyMathCognitive>('/api/math-cognitive/daily', {
+    ...(t ? { token: t } : {}),
+    timeoutMs: IMAGE_FETCH_TIMEOUT_MS,
+  });
 }
 
 export function postMathCognitiveGuess(guess: string, token?: string | null): Promise<MathCognitiveGuessResult> {
@@ -581,7 +659,7 @@ export function postMathCognitiveGuess(guess: string, token?: string | null): Pr
 }
 
 export async function verifyOtp(phone: string, code: string): Promise<TokenPair> {
-  const res = await fetchWithTimeout(`${API_BASE}/api/auth/otp/verify`, {
+  const res = await fetchWithTimeout(`${apiBase()}/api/auth/otp/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone: phone.trim(), code: code.trim() }),

@@ -1,14 +1,15 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text as RNText,
-  TextInput,
+  TextInput as RNTextInput,
   View,
 } from 'react-native';
+import { ScrollView } from 'react-native-gesture-handler';
 import { Button, Text, Title } from 'react-native-paper';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -18,6 +19,7 @@ import { clearAuthTokens, getStoredAccessToken, saveAuthTokens } from '../auth/s
 import {
   checkAliasAvailable,
   fetchUserMe,
+  getApiBaseUrl,
   isPlaceholderPhone,
   registerGuestSession,
   updateUserProfile,
@@ -53,12 +55,19 @@ export function ProfileSetupScreen({ navigation, route }: Props): React.ReactEle
   const [aliasStatus, setAliasStatus] = useState<string | null>(null);
   /** Welcome flow passes prefetchedMe — use once, then always refresh from API on later focuses. */
   const consumedPrefetch = useRef(false);
+  /** Avoid refetch-on-focus wiping in-progress typing (common on Android emulator). */
+  const initialGateLoadDone = useRef(false);
+  const formDirty = useRef(false);
+  const phoneInputRef = useRef<RNTextInput>(null);
+  const aliasInputRef = useRef<RNTextInput>(null);
 
   const applyUserToForm = useCallback((u: UserMe) => {
     setMe(u);
-    setProfilePhone(isPlaceholderPhone(u) ? '' : u.phone);
-    setProfileAlias((u.display_alias ?? '').trim());
-    setAliasStatus(null);
+    if (!formDirty.current) {
+      setProfilePhone(isPlaceholderPhone(u) ? '' : u.phone);
+      setProfileAlias((u.display_alias ?? '').trim());
+      setAliasStatus(null);
+    }
   }, []);
 
   const loadMe = useCallback(async () => {
@@ -148,8 +157,15 @@ export function ProfileSetupScreen({ navigation, route }: Props): React.ReactEle
 
   useFocusEffect(
     useCallback(() => {
-      void loadMe();
-    }, [loadMe]),
+      if (isEditFromHome) {
+        void loadMe();
+        return;
+      }
+      if (!initialGateLoadDone.current) {
+        initialGateLoadDone.current = true;
+        void loadMe();
+      }
+    }, [isEditFromHome, loadMe]),
   );
 
   useLayoutEffect(() => {
@@ -232,8 +248,9 @@ export function ProfileSetupScreen({ navigation, route }: Props): React.ReactEle
           <Title style={styles.errorTitle}>Could not load profile</Title>
           <RNText style={styles.errorText}>{loadError}</RNText>
           <RNText style={styles.errorHint}>
-            On web, the app must reach your API (usually http://localhost:8000). Set EXPO_PUBLIC_API_URL in
-            mobile/.env if the backend uses another host or port.
+            {Platform.OS === 'android'
+              ? `Android emulator: API base is ${getApiBaseUrl()}. Start the backend on your PC (uvicorn on port 8000, host 0.0.0.0), then tap Retry. If this still fails, shake the device (or Ctrl+M) → Reload so Metro picks up mobile/.env.`
+              : 'On web, the app must reach your API (usually http://localhost:8000). Set EXPO_PUBLIC_API_URL in mobile/.env if the backend uses another host or port.'}
           </RNText>
           <Button
             mode="contained"
@@ -266,15 +283,9 @@ export function ProfileSetupScreen({ navigation, route }: Props): React.ReactEle
   const phoneOkForGate = !isPlaceholderPhone(me) || isValidPhilippineMobile(profilePhone);
   const canSave = aliasFormatOk && phoneOkForGate;
 
-  return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.scrollContent}
-      keyboardShouldPersistTaps="handled"
-      accessibilityLabel="Profile setup"
-    >
-      <View style={styles.card}>
-        <Title style={styles.title}>Profile</Title>
+  const formBody = (
+    <View style={styles.card}>
+          <Title style={styles.title}>Profile</Title>
         <Text style={styles.lead}>
           {isEditFromHome
             ? 'Baguhin ang inyong profile. I-save para ilapat ang mga pagbabago.'
@@ -286,14 +297,21 @@ export function ProfileSetupScreen({ navigation, route }: Props): React.ReactEle
         {isPlaceholderPhone(me) ? (
           <>
             <RNText style={styles.label}>Mobile number</RNText>
-            <TextInput
+            <RNTextInput
+              ref={phoneInputRef}
               value={profilePhone}
-              onChangeText={setProfilePhone}
+              onChangeText={(t) => {
+                formDirty.current = true;
+                setProfilePhone(t);
+              }}
               keyboardType="phone-pad"
               placeholder="e.g. 09171234567"
               placeholderTextColor="#6b7280"
               style={styles.input}
               editable={!saving}
+              autoComplete="tel"
+              showSoftInputOnFocus
+              importantForAutofill="yes"
             />
             {profilePhone.trim() && !isValidPhilippineMobile(profilePhone) ? (
               <RNText style={styles.fieldError}>
@@ -308,56 +326,90 @@ export function ProfileSetupScreen({ navigation, route }: Props): React.ReactEle
           </>
         )}
 
-        <RNText style={styles.label}>Alias (unique)</RNText>
-        <TextInput
-          value={profileAlias}
-          onChangeText={(t) => {
-            setProfileAlias(t);
-            setAliasStatus(null);
-          }}
-          onBlur={() => void runAliasCheck()}
-          autoCapitalize="none"
-          autoCorrect={false}
-          placeholder="hal. Lucky_Juan_3"
-          placeholderTextColor="#6b7280"
-          style={styles.input}
-          editable={!saving}
-        />
-        {aliasStatus ? (
-          <RNText
-            style={[styles.aliasStatus, aliasStatus === 'Available' ? styles.aliasOk : styles.aliasWarn]}
+          <RNText style={styles.label}>Alias (unique)</RNText>
+          <RNTextInput
+            ref={aliasInputRef}
+            value={profileAlias}
+            onChangeText={(t) => {
+              formDirty.current = true;
+              setProfileAlias(t);
+              setAliasStatus(null);
+            }}
+            onBlur={() => void runAliasCheck()}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="hal. Lucky_Juan_3"
+            placeholderTextColor="#6b7280"
+            style={styles.input}
+            editable={!saving}
+            showSoftInputOnFocus
+            importantForAutofill="yes"
+          />
+          {aliasStatus ? (
+            <RNText
+              style={[styles.aliasStatus, aliasStatus === 'Available' ? styles.aliasOk : styles.aliasWarn]}
+            >
+              {aliasStatus}
+            </RNText>
+          ) : (
+            <RNText style={styles.hint}>
+              3–20 characters: letters, numbers, at underscore lang. Kung taken na, pumili ng bago.
+            </RNText>
+          )}
+
+          <Button
+            mode="contained"
+            onPress={() => void handleSave()}
+            loading={saving}
+            disabled={saving || !canSave}
+            style={styles.saveBtn}
+            buttonColor="#2f855a"
+            textColor="#f4fff3"
           >
-            {aliasStatus}
-          </RNText>
-        ) : (
-          <RNText style={styles.hint}>
-            3–20 characters: letters, numbers, at underscore lang. Kung taken na, pumili ng bago.
-          </RNText>
-        )}
+            Save profile
+          </Button>
 
-        <Button
-          mode="contained"
-          onPress={() => void handleSave()}
-          loading={saving}
-          disabled={saving || !canSave}
-          style={styles.saveBtn}
-          buttonColor="#2f855a"
-          textColor="#f4fff3"
-        >
-          Save profile
-        </Button>
+          {isEditFromHome ? (
+            <Pressable onPress={() => navigation.goBack()} style={styles.cancelBtn} accessibilityRole="button">
+              <RNText style={styles.cancelText}>Cancel</RNText>
+            </Pressable>
+          ) : null}
+    </View>
+  );
 
-        {isEditFromHome ? (
-          <Pressable onPress={() => navigation.goBack()} style={styles.cancelBtn} accessibilityRole="button">
-            <RNText style={styles.cancelText}>Cancel</RNText>
-          </Pressable>
-        ) : null}
+  if (Platform.OS === 'android') {
+    return (
+      <View style={styles.keyboardRoot} accessibilityLabel="Profile setup">
+        {formBody}
       </View>
-    </ScrollView>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.keyboardRoot}
+      behavior="padding"
+      keyboardVerticalOffset={88}
+    >
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="always"
+        nestedScrollEnabled
+        accessibilityLabel="Profile setup"
+      >
+        {formBody}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardRoot: {
+    flex: 1,
+    backgroundColor: '#dff1de',
+    ...(Platform.OS === 'android' ? { padding: 20, paddingBottom: 40 } : {}),
+  },
   scroll: { flex: 1, backgroundColor: '#dff1de' },
   scrollContent: {
     padding: 20,
@@ -393,7 +445,7 @@ const styles = StyleSheet.create({
     borderColor: '#86b98f',
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: Platform.OS === 'android' ? 12 : 10,
     fontSize: 16,
     color: '#18402a',
     backgroundColor: '#ffffff',

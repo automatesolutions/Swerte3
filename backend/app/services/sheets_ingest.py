@@ -9,6 +9,7 @@ from io import StringIO
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
+import certifi
 import httpx
 import pandas as pd
 from sqlalchemy import select
@@ -121,7 +122,8 @@ def row_hash(session: DrawSession, draw_at: datetime, d1: int, d2: int, d3: int)
 
 def fetch_sheet_dataframe(settings: Settings, tab: str) -> pd.DataFrame:
     url = sheet_csv_url(settings.google_sheet_id, tab)
-    with httpx.Client(timeout=60.0, follow_redirects=True) as client:
+    verify: bool | str = False if settings.sheet_fetch_insecure else certifi.where()
+    with httpx.Client(timeout=60.0, follow_redirects=True, verify=verify) as client:
         r = client.get(url)
         r.raise_for_status()
     return pd.read_csv(StringIO(r.text))

@@ -10,6 +10,7 @@ from app.deps import get_current_user, get_current_user_optional
 from app.models.draw import DrawSession
 from app.models.user import User
 from app.schemas.predict import DrawSessionEnum
+from app.services import elite_profile as elite_profile_service
 from app.services import predictions as pred_service
 
 router = APIRouter(prefix="/predict", tags=["predict"])
@@ -55,6 +56,12 @@ def premium_start_batch(
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    if not elite_profile_service.user_answered_today(db, u.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sagutin muna ang multiple-choice na tanong ngayong araw bago mag-Elite.",
+        )
+
     u.lihim_premium_unlocked_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(u)
@@ -83,12 +90,19 @@ def predict_premium(
     u = db.query(User).filter(User.id == user.id).first()
     if not u:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if u.lihim_premium_unlocked_at is None:
+    if not elite_profile_service.user_answered_today(db, u.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
-                "Mag-GINTO muna sa Home at sagutin ang isang tanong sa profiling. "
-                "Pagkatapos, puwede ang 9AM, 4PM, 9PM hanggang sa susunod na GINTO."
+                "Sagutin ang multiple-choice na tanong ngayong araw bago kunin ang Elite hula."
+            ),
+        )
+    if not elite_profile_service.unlock_is_valid_today(u.lihim_premium_unlocked_at):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Mag-GINTO muna sa Home pagkatapos sagutin ang tanong ngayong araw. "
+                "Pagkatapos, puwede ang 9AM, 4PM, at 9PM."
             ),
         )
     return pred_service.predict_premium_for_session(db, u.id, _session(session))

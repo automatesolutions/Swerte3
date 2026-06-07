@@ -8,7 +8,8 @@ from app.models.prediction_outcome import PredictionOutcome
 from app.models.payment import PaymongoCheckoutBinding, PaymentEvent, PaypalOrderBinding
 from app.models.daily_picture_analysis import DailyPictureAnalysis
 from app.models.daily_math_cognitive import DailyMathCognitive
-from app.models.elite_profile_answer import EliteProfileAnswer
+from app.models.elite_profile_daily_answer import EliteProfileDailyAnswer
+from app.models.elite_profile_gate_visit import EliteProfileGateVisit
 
 __all__ = [
     "Draw",
@@ -23,5 +24,6 @@ __all__ = [
     "PaypalOrderBinding",
     "DailyPictureAnalysis",
     "DailyMathCognitive",
-    "EliteProfileAnswer",
+    "EliteProfileDailyAnswer",
+    "EliteProfileGateVisit",
 ]

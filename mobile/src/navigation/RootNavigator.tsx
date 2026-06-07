@@ -56,7 +56,7 @@ const screenOptions = {
  */
 export function RootNavigator(): React.ReactElement {
   return (
-    <NavigationContainer linking={Platform.OS === 'web' ? undefined : linking}>
+    <NavigationContainer linking={Platform.OS === 'web' || Platform.OS === 'android' ? undefined : linking}>
       <Stack.Navigator initialRouteName="VideoHome" screenOptions={screenOptions}>
         <Stack.Screen
           name="VideoHome"
@@ -77,6 +77,8 @@ export function RootNavigator(): React.ReactElement {
             headerStyle: { backgroundColor: '#1a0f08' },
             headerTintColor: '#f7e7b0',
             headerShadowVisible: false,
+            gestureEnabled: false,
+            headerBackVisible: false,
           }}
         />
         <Stack.Screen

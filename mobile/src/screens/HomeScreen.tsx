@@ -385,8 +385,8 @@ export function HomeScreen({ navigation }: Props): React.ReactElement {
             </View>
             <Text style={styles.explainTextElite}>
               Elite blends several AI agents into one premium number set. Tap the gold{' '}
-              <Text style={styles.explainTextEliteEm}>GINTO</Text> button — sagutin ang isang mabilis na tanong,
-              then check Elite predictions for 9AM, 4PM, and 9PM.
+              <Text style={styles.explainTextEliteEm}>GINTO</Text> button — sagutin ang multiple-choice na tanong
+              ngayong araw, then check Elite predictions for 9AM, 4PM, and 9PM.
             </Text>
             <View style={styles.lihimActionsRow}>
               <Button

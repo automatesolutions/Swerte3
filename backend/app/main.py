@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import Base, engine, ensure_users_table_schema
 from app.routers import (
+    admin_analytics,
     analytics,
     auth,
     elite_profile,
@@ -42,6 +43,7 @@ app.include_router(elite_profile.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(payments.router, prefix="/api")
 app.include_router(ingest.router, prefix="/api")
+app.include_router(admin_analytics.router, prefix="/api")
 app.include_router(picture_analysis.router, prefix="/api")
 app.include_router(math_cognitive.router, prefix="/api")
 

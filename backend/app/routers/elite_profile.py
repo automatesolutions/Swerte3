@@ -23,7 +23,7 @@ def get_next_profile_question(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Next single question to show before this Elite visit (progressive over time)."""
+    """Today's multiple-choice gate question (rotates daily). Shown on every Elite entry; answer required each visit."""
     return elite_profile_service.get_next_question_payload(db, user.id)
 
 

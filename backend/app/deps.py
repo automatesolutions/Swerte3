@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from typing import Annotated, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from app.config import get_settings
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -90,6 +92,17 @@ def get_user_for_daily_tips(
                 detail="Could not resolve anonymous user",
             ) from None
         return u
+
+
+def admin_guard(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
+    key = get_settings().admin_api_key
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ADMIN_API_KEY not configured",
+        )
+    if not x_admin_key or x_admin_key != key:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 def require_premium(user: User) -> User:

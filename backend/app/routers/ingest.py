@@ -1,22 +1,11 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.database import get_db
+from app.deps import admin_guard
 from app.services.sheets_ingest import run_full_ingest
 
 router = APIRouter(prefix="/internal", tags=["internal"])
-
-
-def admin_guard(x_admin_key: str | None = Header(None, alias="X-Admin-Key")):
-    key = get_settings().admin_api_key
-    if not key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="ADMIN_API_KEY not configured",
-        )
-    if not x_admin_key or x_admin_key != key:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 @router.post("/ingest")
