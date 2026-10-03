@@ -113,9 +113,25 @@ class Settings(BaseSettings):
         return [o.strip() for o in raw.split(",") if o.strip()]
 
 
+_ENV_MTIME = 0.0
+
+
 @lru_cache
-def get_settings() -> Settings:
+def _cached_settings() -> Settings:
     return Settings()
+
+
+def get_settings() -> Settings:
+    """Re-read backend/.env when that file changes (uvicorn --reload only watches .py)."""
+    global _ENV_MTIME
+    try:
+        mtime = _BACKEND_ENV.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    if mtime != _ENV_MTIME:
+        _cached_settings.cache_clear()
+        _ENV_MTIME = mtime
+    return _cached_settings()
 
 
 # Swertres domain: three digits 0-9 per position (repeats allowed)
