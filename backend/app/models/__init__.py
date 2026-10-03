@@ -8,6 +8,7 @@ from app.models.prediction_outcome import PredictionOutcome
 from app.models.payment import PaymongoCheckoutBinding, PaymentEvent, PaypalOrderBinding
 from app.models.daily_picture_analysis import DailyPictureAnalysis
 from app.models.daily_math_cognitive import DailyMathCognitive
+from app.models.token_survey import TokenSurveyAnswer
 
 __all__ = [
     "Draw",
@@ -22,4 +23,5 @@ __all__ = [
     "PaypalOrderBinding",
     "DailyPictureAnalysis",
     "DailyMathCognitive",
+    "TokenSurveyAnswer",
 ]

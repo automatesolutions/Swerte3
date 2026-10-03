@@ -8,7 +8,7 @@ import logging
 from datetime import date
 
 from openai import OpenAI
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from app.config import Settings
 
@@ -113,10 +113,16 @@ def dalle_bw_b64(
         "model": model,
         "prompt": full_prompt,
         "n": 1,
-        "response_format": "b64_json",
     }
+    # gpt-image-* rejects response_format. dall-e-2/3 still accept b64_json; we retry without it
+    # if the live API has dropped the param (400 unknown_parameter).
+    legacy = model.startswith("dall-e-")
+    if legacy:
+        gen_kwargs["response_format"] = "b64_json"
     if model == "dall-e-2":
         gen_kwargs["size"] = size if size in ALLOWED_DALLE2_SIZES else "256x256"
+    elif not legacy and size:
+        gen_kwargs["size"] = size
 
     logger.info(
         "%s: dalle model=%s size=%s",
@@ -125,11 +131,27 @@ def dalle_bw_b64(
         gen_kwargs.get("size", "(default)"),
     )
 
-    resp = client.images.generate(**gen_kwargs)
+    try:
+        resp = client.images.generate(**gen_kwargs)
+    except Exception as e:
+        if "response_format" in str(e) and "response_format" in gen_kwargs:
+            gen_kwargs.pop("response_format", None)
+            logger.info("%s: retrying Images API without response_format", log_label)
+            resp = client.images.generate(**gen_kwargs)
+        else:
+            raise
+
     data = resp.data[0]
-    if not data.b64_json:
-        raise RuntimeError("OpenAI returned no image data")
-    return data.b64_json, "image/png"
+    if getattr(data, "b64_json", None):
+        return data.b64_json, "image/png"
+    url = getattr(data, "url", None)
+    if url:
+        import httpx
+
+        fetched = httpx.get(url, timeout=30.0)
+        fetched.raise_for_status()
+        return base64.standard_b64encode(fetched.content).decode("ascii"), "image/png"
+    raise RuntimeError("OpenAI returned no image data")
 
 
 def generate_bw_cartoon(user_id: int, cal: date, settings: Settings) -> tuple[str, str, str]:
@@ -151,14 +173,61 @@ def generate_bw_cartoon(user_id: int, cal: date, settings: Settings) -> tuple[st
         raise RuntimeError("Image prompt exceeds API length limit")
     model = (settings.openai_image_model or "dall-e-2").strip()
     size_ov = "512x512" if model == "dall-e-2" else None
-    b64, mime = dalle_bw_b64(
-        prompt,
-        settings,
-        log_label=f"picture_analysis user={user_id} date={cal}",
-        size_override=size_ov,
-    )
+    try:
+        b64, mime = dalle_bw_b64(
+            prompt,
+            settings,
+            log_label=f"picture_analysis user={user_id} date={cal}",
+            size_override=size_ov,
+        )
+    except Exception as e:
+        logger.warning("picture_analysis OpenAI failed (%s); using local puzzle", e)
+        b64, mime = local_bw_puzzle_b64(user_id, cal, theme_key)
     b64 = pad_png_b64(b64)
     return b64, mime, theme_key
+
+
+def local_bw_puzzle_b64(user_id: int, cal: date, theme_key: str) -> tuple[str, str]:
+    """Ink-on-white number hunt when the Images API is down or rejects the request."""
+    seed = int(hashlib.sha256(f"{user_id}|{cal.isoformat()}|{theme_key}".encode()).hexdigest()[:8], 16)
+    w = h = 512
+    im = Image.new("RGB", (w, h), (255, 255, 255))
+    draw = ImageDraw.Draw(im)
+    font = ImageFont.load_default()
+
+    # Shelf / booth frames
+    for i, y in enumerate((90, 220, 350)):
+        draw.rectangle((40, y, w - 40, y + 88), outline=(0, 0, 0), width=3)
+        draw.line((40, y + 28, w - 40, y + 28), fill=(0, 0, 0), width=2)
+        label = ("SARI-SARI", "PERYA", "TINDAHAN", "KALYE", "KOMIKS")[i % 5]
+        draw.text((52, y + 6), label, fill=(0, 0, 0), font=font)
+
+    # Price tags and hidden digits
+    digits = f"{seed:08d}" + f"{(seed * 7) % 100000:05d}"
+    positions = [
+        (70, 130),
+        (200, 130),
+        (340, 130),
+        (70, 260),
+        (220, 260),
+        (370, 260),
+        (90, 390),
+        (240, 390),
+        (380, 390),
+        (150, 60),
+        (300, 60),
+        (430, 200),
+        (50, 470),
+    ]
+    for i, (x, y) in enumerate(positions):
+        d = digits[i % len(digits)]
+        draw.rectangle((x, y, x + 46, y + 28), outline=(0, 0, 0), width=2)
+        draw.text((x + 16, y + 8), d, fill=(0, 0, 0), font=font)
+
+    draw.rectangle((8, 8, w - 9, h - 9), outline=(0, 0, 0), width=2)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG", optimize=True)
+    return base64.standard_b64encode(buf.getvalue()).decode("ascii"), "image/png"
 
 
 def generate_bw_cartoon_scene(scene_description: str, settings: Settings, *, log_label: str) -> tuple[str, str]:

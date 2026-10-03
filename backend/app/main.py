@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import Base, engine, ensure_users_table_schema
-from app.routers import analytics, auth, health, ingest, math_cognitive, payments, picture_analysis, predict
+from app.routers import analytics, auth, health, ingest, math_cognitive, payments, picture_analysis, predict, token_survey
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,10 +17,13 @@ settings = get_settings()
 
 app = FastAPI(title="Swerte3 API", version="0.1.0")
 
+_cors_origins = settings.cors_origins_list
+_cors_wildcard = _cors_origins == ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    # Browsers reject Access-Control-Allow-Origin: * when credentials are allowed.
+    allow_credentials=not _cors_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -33,6 +36,7 @@ app.include_router(payments.router, prefix="/api")
 app.include_router(ingest.router, prefix="/api")
 app.include_router(picture_analysis.router, prefix="/api")
 app.include_router(math_cognitive.router, prefix="/api")
+app.include_router(token_survey.router, prefix="/api")
 
 
 @app.on_event("startup")

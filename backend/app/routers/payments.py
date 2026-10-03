@@ -75,7 +75,11 @@ def _client_return_url_allowed(url: str) -> bool:
     u = (url or "").strip()
     if not u or len(u) > 512:
         return False
-    scheme = (urlparse(u).scheme or "").lower()
+    parsed = urlparse(u)
+    scheme = (parsed.scheme or "").lower()
+    if scheme == "http":
+        # Web app dev server (e.g. http://localhost:5173/checkout-done); never plain http elsewhere.
+        return (parsed.hostname or "").lower() in ("localhost", "127.0.0.1")
     return scheme in ("swerte3", "exp", "exps", "https")
 
 
