@@ -8,6 +8,7 @@ import json
 import logging
 import random
 import re
+import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.models.otp import OTPChallenge
 from app.models.user import User
+from app.services import jev
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +58,7 @@ def _send_twilio_sms(to_e164: str, body: str) -> None:
         )
     auth = base64.b64encode(f"{sid}:{token}".encode("utf-8")).decode("ascii")
     url = f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=jev.sms_policy("twilio")) as client:
         r = client.post(
             url,
             data={"To": to_e164, "From": from_num, "Body": body},
@@ -101,7 +103,7 @@ def _send_semaphore_otp(phone_e164: str, code: str) -> None:
     }
     if sender:
         data["sendername"] = sender
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=jev.sms_policy("semaphore")) as client:
         r = client.post(
             SEMAPHORE_OTP_URL,
             data=data,
@@ -177,6 +179,33 @@ def issue_otp(db: Session, phone: str) -> str:
     settings = get_settings()
     code = _issue_code(settings)
     expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    with jev.stage("db"):
+        _store_challenge(db, phone, code, expires, settings)
+
+    prov = settings.sms_provider.lower().strip()
+    t0 = time.perf_counter()
+    ok = False
+    try:
+        with jev.stage("sms"):
+            _deliver(prov, phone, code)
+        ok = True
+    except httpx.TimeoutException as exc:
+        raise OtpDeliveryError("The SMS service is slow right now. Please try again in a minute.") from exc
+    except httpx.HTTPError as exc:
+        raise OtpDeliveryError("Could not reach the SMS service. Please try again in a minute.") from exc
+    finally:
+        jev.log(
+            "sms_timing",
+            provider=prov,
+            phone=jev.mask_phone(phone),
+            ms=round((time.perf_counter() - t0) * 1000, 1),
+            ok=ok,
+            severity="INFO" if ok else "WARNING",
+        )
+    return code
+
+
+def _store_challenge(db: Session, phone: str, code: str, expires: datetime, settings: Settings) -> None:
     invalidated = (
         db.query(OTPChallenge)
         .filter(
@@ -191,16 +220,17 @@ def issue_otp(db: Session, phone: str) -> str:
     db.add(row)
     db.commit()
 
-    prov = settings.sms_provider.lower().strip()
+
+def _deliver(prov: str, phone: str, code: str) -> None:
     if prov == "console":
         print(f"[OTP console] {phone} -> {code}")
-        return code
+        return
     if prov == "twilio":
         _send_twilio_sms(phone, f"Your Swerte3 verification code is: {code}")
-        return code
+        return
     if prov == "semaphore":
         _send_semaphore_otp(phone, code)
-        return code
+        return
     raise ValueError(
         f"Unknown SMS_PROVIDER={settings.sms_provider!r}; use 'console', 'twilio', or 'semaphore'. PH SMS: set 'semaphore'.",
     )

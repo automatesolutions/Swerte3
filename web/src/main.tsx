@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom';
 import './styles/app.css';
@@ -9,12 +9,20 @@ import { WalletProvider } from './state/wallet';
 import { Welcome } from './pages/Welcome';
 import { Profile } from './pages/Profile';
 import { Home } from './pages/Home';
-import { LuckyPick } from './pages/LuckyPick';
-import { Elite } from './pages/Elite';
-import { Tips } from './pages/Tips';
-import { Cognitive } from './pages/Cognitive';
-import { AnalyticsFeature, AnalyticsHub } from './pages/Analytics';
-import { CheckoutDone } from './pages/CheckoutDone';
+import { API_BASE } from './lib/api';
+import { wakeApi } from './lib/jev';
+
+// Start a cold API instance now, in parallel with React rendering and the bootstrap calls.
+wakeApi(API_BASE);
+
+// Only the first screens ship in the main bundle; the rest load when opened.
+const LuckyPick = lazy(() => import('./pages/LuckyPick').then((m) => ({ default: m.LuckyPick })));
+const Elite = lazy(() => import('./pages/Elite').then((m) => ({ default: m.Elite })));
+const Tips = lazy(() => import('./pages/Tips').then((m) => ({ default: m.Tips })));
+const Cognitive = lazy(() => import('./pages/Cognitive').then((m) => ({ default: m.Cognitive })));
+const AnalyticsHub = lazy(() => import('./pages/Analytics').then((m) => ({ default: m.AnalyticsHub })));
+const AnalyticsFeature = lazy(() => import('./pages/Analytics').then((m) => ({ default: m.AnalyticsFeature })));
+const CheckoutDone = lazy(() => import('./pages/CheckoutDone').then((m) => ({ default: m.CheckoutDone })));
 
 initTheme();
 

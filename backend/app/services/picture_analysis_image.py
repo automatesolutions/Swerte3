@@ -7,10 +7,22 @@ import io
 import logging
 from datetime import date
 
-from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont
 
 from app.config import Settings
+
+# openai costs ~1 s to import; resolved on first image request so cold starts stay fast.
+# Module-level name so tests can monkeypatch it.
+OpenAI = None
+
+
+def _openai_client_class():
+    global OpenAI
+    if OpenAI is None:
+        from openai import OpenAI as _OpenAI
+
+        OpenAI = _OpenAI
+    return OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +119,7 @@ def dalle_bw_b64(
         size = "256x256"
 
     base_url = (settings.openai_image_base_url or "https://api.openai.com/v1").rstrip("/")
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    client = _openai_client_class()(api_key=api_key, base_url=base_url)
 
     gen_kwargs: dict = {
         "model": model,

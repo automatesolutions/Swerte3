@@ -13,7 +13,7 @@ AI-assisted Swertres / 3D Lotto companion: **Web app (React + Vite)** + **FastAP
 cd backend
 python -m venv .venv
 .\.venv\Scripts\activate   # Windows
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 copy .env.example .env     # then edit DATABASE_URL, SECRET_KEY, etc.
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```

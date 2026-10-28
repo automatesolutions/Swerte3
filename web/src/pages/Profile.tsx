@@ -7,6 +7,7 @@ import { cleanError } from '../lib/dates';
 import { logScreenView } from '../lib/analytics';
 import { useReveal } from '../lib/motion';
 import { useSession } from '../state/session';
+import { PageSkeleton } from '../components/AppShell';
 
 const ALIAS_PATTERN = /^[a-zA-Z0-9_]{3,20}$/;
 
@@ -66,14 +67,7 @@ export function Profile() {
     return () => window.clearTimeout(t);
   }, [alias, account?.alias]);
 
-  if (status === 'loading' && !account) {
-    return (
-      <div className="center-state" aria-busy="true">
-        <span className="spinner" aria-hidden />
-        <p>Loading your profile…</p>
-      </div>
-    );
-  }
+  if (status === 'loading' && !account) return <PageSkeleton label="Loading your profile…" />;
 
   if (!account || !me) {
     return (

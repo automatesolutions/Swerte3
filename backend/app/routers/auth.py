@@ -14,6 +14,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
 from app.schemas.auth import OTPRequest, OTPVerify, ProfileUpdate, RefreshRequest, TokenResponse
+from app.services import jev
 from app.services.jwt_service import create_access_token, create_refresh_token, decode_token
 from app.services.otp_service import (
     INVALID_PHONE_HINT,
@@ -237,11 +238,13 @@ def verify(body: OTPVerify, db: Session = Depends(get_db)):
         access = create_access_token(str(user.id), {"phone": phone})
         refresh = create_refresh_token(str(user.id))
         return TokenResponse(access_token=access, refresh_token=refresh)
-    if not verify_otp(db, phone, body.code.strip()):
-        raise HTTPException(status_code=401, detail="Invalid or expired code")
-    user = get_or_create_user(db, phone)
-    access = create_access_token(str(user.id), {"phone": phone})
-    refresh = create_refresh_token(str(user.id))
+    with jev.stage("db"):
+        if not verify_otp(db, phone, body.code.strip()):
+            raise HTTPException(status_code=401, detail="Invalid or expired code")
+        user = get_or_create_user(db, phone)
+    with jev.stage("token"):
+        access = create_access_token(str(user.id), {"phone": phone})
+        refresh = create_refresh_token(str(user.id))
     return TokenResponse(access_token=access, refresh_token=refresh)
 
 
@@ -250,14 +253,23 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
     try:
         data = decode_token(body.refresh_token)
         if data.get("type") != "refresh":
+            jev.log("refresh_rejected", reason="wrong_token_type", severity="WARNING")
             raise HTTPException(status_code=401, detail="Invalid token")
         uid = int(data["sub"])
-    except (JWTError, KeyError, ValueError):
+    except JWTError as exc:
+        reason = "expired" if "expired" in str(exc).lower() else "bad_signature_or_malformed"
+        jev.log("refresh_rejected", reason=reason, severity="WARNING")
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except (KeyError, ValueError):
+        jev.log("refresh_rejected", reason="bad_subject", severity="WARNING")
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    user = db.query(User).filter(User.id == uid).first()
+    with jev.stage("db"):
+        user = db.query(User).filter(User.id == uid).first()
     if not user:
+        jev.log("refresh_rejected", reason="user_not_found", user_id=uid, severity="WARNING")
         raise HTTPException(status_code=401, detail="User not found")
-    access = create_access_token(str(user.id), {"phone": user.phone_e164})
-    new_refresh = create_refresh_token(str(user.id))
+    with jev.stage("token"):
+        access = create_access_token(str(user.id), {"phone": user.phone_e164})
+        new_refresh = create_refresh_token(str(user.id))
     return TokenResponse(access_token=access, refresh_token=new_refresh)

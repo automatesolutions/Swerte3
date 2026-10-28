@@ -187,7 +187,11 @@ engine = _create_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-def get_db():
+async def get_db():
+    """Async on purpose. FastAPI runs a *sync* generator's cleanup in the threadpool, so once every
+    worker thread is waiting for a pooled connection, the db.close() that would free one can never
+    run and the instance deadlocks (seen locally at 100 concurrent logins). Sync routes still get the
+    session in their thread; only open/close happen on the event loop, and both are non-blocking."""
     db = SessionLocal()
     try:
         yield db

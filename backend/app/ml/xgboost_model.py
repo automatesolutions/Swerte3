@@ -1,11 +1,13 @@
 """XGBoost multi-output digit predictors for Swertres."""
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple
 
 import numpy as np
-import xgboost as xgb
-from sklearn.multioutput import MultiOutputClassifier
+
+# xgboost + sklearn cost ~5 s to import; load them on first fit so cold starts stay fast.
+if TYPE_CHECKING:
+    from sklearn.multioutput import MultiOutputClassifier
 
 from app.config import XGBOOST_PARAMS
 from app.ml.features import build_supervised_pairs
@@ -22,6 +24,9 @@ class SwertresXGBoost:
         X, y = build_supervised_pairs(history, lookback=self.lookback)
         if len(X) < 8:
             return False
+        import xgboost as xgb
+        from sklearn.multioutput import MultiOutputClassifier
+
         base = xgb.XGBClassifier(**XGBOOST_PARAMS)
         self.model = MultiOutputClassifier(base)
         self.model.fit(X, y)

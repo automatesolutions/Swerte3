@@ -48,8 +48,20 @@ async function readErrorMessage(res: Response): Promise<string> {
   }
 }
 
-/** One attempt to rotate the access token after a 401 (expired JWT). */
-async function tryRefreshAccessToken(): Promise<string | null> {
+let refreshInFlight: Promise<string | null> | null = null;
+
+/**
+ * Rotate the access token. Single-flight: parallel callers (session bootstrap, wallet, a 401 retry)
+ * share one /refresh call instead of each rotating the token.
+ */
+export function tryRefreshAccessToken(): Promise<string | null> {
+  refreshInFlight ??= doRefresh().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function doRefresh(): Promise<string | null> {
   const refresh = getStoredRefreshToken();
   if (!refresh) return null;
   try {

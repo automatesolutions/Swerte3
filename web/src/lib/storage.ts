@@ -1,5 +1,7 @@
 export const ACCESS_TOKEN_KEY = 'swerte3_access_token';
 export const REFRESH_TOKEN_KEY = 'swerte3_refresh_token';
+/** Last /me answer, shown instantly on the next visit (display only; the server re-checks). */
+export const ME_CACHE_KEY = 'swerte3_me_cache';
 
 /** Best-effort localStorage: private mode or blocked storage must never crash the app. */
 export function lsGet(key: string): string | null {
@@ -42,4 +44,5 @@ export function saveAuthTokens(accessToken: string, refreshToken: string): void 
 export function clearAuthTokens(): void {
   lsDelete(ACCESS_TOKEN_KEY);
   lsDelete(REFRESH_TOKEN_KEY);
+  lsDelete(ME_CACHE_KEY);
 }

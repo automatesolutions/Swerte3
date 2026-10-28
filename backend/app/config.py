@@ -134,6 +134,10 @@ def get_settings() -> Settings:
     return _cached_settings()
 
 
+# Keep the lru_cache API callers and tests rely on (get_settings.cache_clear()).
+get_settings.cache_clear = _cached_settings.cache_clear  # type: ignore[attr-defined]
+
+
 # Swertres domain: three digits 0-9 per position (repeats allowed)
 SWERTRES_DIGIT_MIN = 0
 SWERTRES_DIGIT_MAX = 9

@@ -3,19 +3,23 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import re
 from datetime import datetime, timezone
 from io import StringIO
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import httpx
-import pandas as pd
 from sqlalchemy import select
 
 from app.config import Settings, get_settings
 from app.models.draw import Draw, DrawSession, IngestionRun
 from sqlalchemy.orm import Session
+
+# pandas costs ~1.2 s to import; load it only when an ingest actually runs.
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +60,7 @@ def sheet_csv_url(sheet_id: str, tab: str) -> str:
 
 def parse_result_cell(value: str) -> Optional[Tuple[int, int, int]]:
     """Parse values like '1-2-3', '123', '1,2,3' into three digits 0-9."""
-    if value is None or (isinstance(value, float) and pd.isna(value)):
+    if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if float(value).is_integer() and 0 <= int(value) <= 999:
@@ -94,7 +98,7 @@ def parse_result_cell(value: str) -> Optional[Tuple[int, int, int]]:
 
 
 def parse_draw_date(value: Any) -> Optional[datetime]:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
+    if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
     if isinstance(value, datetime):
         return value.replace(tzinfo=value.tzinfo or timezone.utc)
@@ -108,6 +112,8 @@ def parse_draw_date(value: Any) -> Optional[datetime]:
         except ValueError:
             continue
     try:
+        import pandas as pd
+
         return pd.to_datetime(s, utc=True).to_pydatetime()
     except Exception:
         logger.warning("Could not parse date: %s", s)
@@ -124,6 +130,8 @@ def fetch_sheet_dataframe(settings: Settings, tab: str) -> pd.DataFrame:
     with httpx.Client(timeout=60.0, follow_redirects=True) as client:
         r = client.get(url)
         r.raise_for_status()
+    import pandas as pd
+
     return pd.read_csv(StringIO(r.text))
 
 

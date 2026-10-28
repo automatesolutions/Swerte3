@@ -7,8 +7,6 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
-
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -60,6 +58,8 @@ class LLMClient:
         self.model = model or s.llm_model_name or "gpt-4o-mini"
         if not self.api_key:
             raise ValueError("LLM_API_KEY is not configured")
+        from openai import OpenAI  # ~1 s import; keep it off the cold-start path
+
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def chat_json(

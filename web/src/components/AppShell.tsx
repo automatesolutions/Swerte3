@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   IconBulb,
@@ -175,14 +175,7 @@ function Gate() {
 
   if (!hasSeenIntro()) return <Navigate to="/welcome" replace />;
 
-  if (status === 'loading' && !account) {
-    return (
-      <div className="center-state" aria-busy="true">
-        <span className="spinner" aria-hidden />
-        <p>Loading your account…</p>
-      </div>
-    );
-  }
+  if (status === 'loading' && !account) return <PageSkeleton label="Loading your account…" />;
 
   if (status === 'error' && !account) {
     return (
@@ -211,7 +204,34 @@ function Gate() {
     return <Navigate to={`/profile?from=complete_profile&next=${encodeURIComponent(pathname)}`} replace />;
   }
 
-  return <Outlet />;
+  return (
+    <Suspense fallback={<PageSkeleton label="Loading…" />}>
+      <Outlet />
+    </Suspense>
+  );
+}
+
+/** Page-shaped placeholder instead of a bare spinner. After 3 s it says why the wait is longer. */
+export function PageSkeleton({ label }: { label: string }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setSlow(true), 3000);
+    return () => window.clearTimeout(t);
+  }, []);
+  return (
+    <div className="container page stack" aria-busy="true">
+      <span className="sr-only">{label}</span>
+      <div className="skeleton" style={{ height: 36, width: '55%' }} />
+      <div className="skeleton" style={{ height: 140 }} />
+      <div className="skeleton" style={{ height: 96 }} />
+      <div className="skeleton" style={{ height: 96 }} />
+      {slow && (
+        <p className="hint" role="status">
+          Waking up the server. This takes a few seconds the first time.
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function AppShell() {

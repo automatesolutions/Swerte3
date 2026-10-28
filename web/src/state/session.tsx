@@ -1,5 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { fetchUserMe, isPlaceholderPhone, registerGuestSession, userNeedsProfile, type UserMe } from '../lib/api';
+import {
+  fetchUserMe,
+  isPlaceholderPhone,
+  registerGuestSession,
+  tryRefreshAccessToken,
+  userNeedsProfile,
+  type UserMe,
+} from '../lib/api';
+import { accessTokenLooksExpired, logJev, planBootstrap, writeCachedMe } from '../lib/jev';
 import { clearAuthTokens, getStoredAccessToken, lsGet, lsSet, saveAuthTokens } from '../lib/storage';
 import { errorStatus } from '../lib/dates';
 
@@ -54,16 +62,29 @@ async function newGuestToken(): Promise<string> {
 }
 
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [me, setMeState] = useState<UserMe | null>(null);
+  // Jev: a returning user sees their last known account at once; /me below confirms or replaces it.
+  const [plan] = useState(planBootstrap);
+  const [me, setMeState] = useState<UserMe | null>(plan.cached);
   const [status, setStatus] = useState<SessionStatus>('loading');
   const [error, setError] = useState<string | null>(null);
   /** Ignore stale results when focus and mount both trigger a refresh. */
   const seq = useRef(0);
 
-  const ensureToken = useCallback(async () => getStoredAccessToken() ?? newGuestToken(), []);
+  const ensureToken = useCallback(async () => {
+    const stored = getStoredAccessToken();
+    if (stored && !accessTokenLooksExpired(stored)) return stored;
+    // Expired (or missing) access token: refresh before calling /me instead of waiting for its 401.
+    if (stored || plan.path === 'refresh_first') {
+      const next = await tryRefreshAccessToken();
+      if (next) return next;
+      if (stored) return stored; // let /me decide; its 401 path starts a new guest
+    }
+    return newGuestToken();
+  }, [plan.path]);
 
   const refresh = useCallback(async (): Promise<UserMe | null> => {
     const mine = ++seq.current;
+    const started = performance.now();
     try {
       let token = await ensureToken();
       let user: UserMe;
@@ -76,6 +97,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         token = await newGuestToken();
         user = await fetchUserMe(token);
       }
+      writeCachedMe(user);
+      logJev('account_fresh', 'me_loaded', 'server confirmed the session', {
+        ms: Math.round(performance.now() - started),
+      });
       if (mine === seq.current) {
         setMeState(user);
         setError(null);
@@ -101,6 +126,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const setMe = useCallback((u: UserMe) => {
+    writeCachedMe(u);
     setMeState(u);
     setStatus('ready');
   }, []);
